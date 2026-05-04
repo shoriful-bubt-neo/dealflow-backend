@@ -1,0 +1,201 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id         Int      @id @default(autoincrement())
+  phone      String   @unique
+  isVerified Boolean  @default(false) @map("is_verified")
+  role       UserRole @default(USER)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  dealsAsBuyer  Deal[] @relation("buyerDeals")
+  dealsAsSeller Deal[] @relation("sellerDeals")
+
+  @@map("users")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+model OTP {
+  id        Int      @id @default(autoincrement())
+  phone     String
+  code      String
+  expiresAt DateTime @map("expires_at")
+  isUsed    Boolean  @default(false) @map("is_used")
+
+  @@index([phone])
+  @@map("otps")
+}
+
+model Deal {
+  id         Int        @id @default(autoincrement())
+  amount     Float
+  status     DealStatus @default(CREATED)
+  paymentRef String     @unique @map("payment_ref")
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  buyerId  Int @map("buyer_id")
+  sellerId Int @map("seller_id")
+
+  buyer  User @relation("buyerDeals", fields: [buyerId], references: [id])
+  seller User @relation("sellerDeals", fields: [sellerId], references: [id])
+
+  messages Message[]
+  escrow   Escrow?
+  payments Payment[]
+  disputes Dispute[]
+  audits   AuditLog[]
+
+  @@index([buyerId])
+  @@index([sellerId])
+  @@index([status])
+  @@map("deals")
+}
+
+model Message {
+  id        Int         @id @default(autoincrement())
+  dealId    Int         @map("deal_id")
+  senderId  Int?        @map("sender_id")
+  content   String
+  type      MessageType
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  deal Deal @relation(fields: [dealId], references: [id])
+
+  @@index([dealId])
+  @@map("messages")
+}
+
+model Escrow {
+  id     Int          @id @default(autoincrement())
+  dealId Int          @unique @map("deal_id")
+  amount Float
+  status EscrowStatus @default(HELD)
+
+  deal Deal @relation(fields: [dealId], references: [id])
+
+  @@map("escrows")
+}
+
+model Payment {
+  id     Int           @id @default(autoincrement())
+  dealId Int           @map("deal_id")
+  trxId  String        @map("trx_id")
+  method PaymentMethod
+  status PaymentStatus @default(PENDING)
+
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  ipAddress  String? @map("ip_address")
+  deviceInfo String? @map("device_info")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  deal Deal @relation(fields: [dealId], references: [id])
+
+  @@index([dealId])
+  @@index([trxId])
+  @@map("payments")
+}
+
+model Dispute {
+  id        Int           @id @default(autoincrement())
+  dealId    Int           @map("deal_id")
+  reason    String
+  status    DisputeStatus @default(OPEN)
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  deal Deal @relation(fields: [dealId], references: [id])
+
+  @@index([dealId])
+  @@map("disputes")
+}
+
+model AuditLog {
+  id     Int  @id @default(autoincrement())
+  dealId Int? @map("deal_id")
+  userId Int? @map("user_id")
+
+  action String // e.g. "PAYMENT_VERIFIED"
+  meta   Json? // store extra info
+
+  createdAt DateTime @default(now()) @map("created_at")
+  deal      Deal?    @relation(fields: [dealId], references: [id])
+
+  @@index([dealId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+model Transaction {
+  id     Int             @id @default(autoincrement())
+  dealId Int             @map("deal_id")
+  type   TransactionType
+  amount Float
+
+  reference String? // external ref
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([dealId])
+  @@map("transactions")
+}
+
+enum DealStatus {
+  CREATED
+  AWAITING_PAYMENT
+  PAID
+  DELIVERED
+  COMPLETED
+  DISPUTED
+  CANCELLED
+}
+
+enum EscrowStatus {
+  HELD
+  RELEASED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  BKASH
+  NAGAD
+  ROCKET
+}
+
+enum PaymentStatus {
+  PENDING
+  VERIFIED
+  FAILED
+}
+
+enum MessageType {
+  USER
+  SYSTEM
+}
+
+enum DisputeStatus {
+  OPEN
+  RESOLVED
+  REJECTED
+}
+
+enum TransactionType {
+  PAYMENT_RECEIVED
+  ESCROW_HELD
+  ESCROW_RELEASED
+  REFUND
+}
