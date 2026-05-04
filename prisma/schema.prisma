@@ -13,21 +13,73 @@ datasource db {
 }
 
 model User {
-  id         Int      @id @default(autoincrement())
-  phone      String   @unique
-  isVerified Boolean  @default(false) @map("is_verified")
-  role       UserRole @default(USER)
-  createdAt  DateTime @default(now()) @map("created_at")
+  id         Int     @id @default(autoincrement())
+  phone      String  @unique
+  password   String?
+  isVerified Boolean @default(false) @map("is_verified")
+
+  isActive    Boolean   @default(true) @map("is_active")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  roles UserRole[]
 
   dealsAsBuyer  Deal[] @relation("buyerDeals")
   dealsAsSeller Deal[] @relation("sellerDeals")
 
+  @@index([phone])
   @@map("users")
 }
 
-enum UserRole {
-  USER
-  ADMIN
+model Role {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  id Int @id @default(autoincrement())
+
+  userId Int @map("user_id")
+  roleId Int @map("role_id")
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  id Int @id @default(autoincrement())
+
+  roleId       Int @map("role_id")
+  permissionId Int @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
 }
 
 model OTP {
@@ -37,16 +89,18 @@ model OTP {
   expiresAt DateTime @map("expires_at")
   isUsed    Boolean  @default(false) @map("is_used")
 
+  createdAt DateTime @default(now()) @map("created_at")
+
   @@index([phone])
   @@map("otps")
 }
 
 model Deal {
-  id         Int        @id @default(autoincrement())
-  amount     Float
-  status     DealStatus @default(CREATED)
-  paymentRef String     @unique @map("payment_ref")
-  createdAt  DateTime   @default(now()) @map("created_at")
+  id     Int        @id @default(autoincrement())
+  amount Float
+  status DealStatus @default(CREATED)
+
+  paymentRef String @unique @map("payment_ref")
 
   buyerId  Int @map("buyer_id")
   sellerId Int @map("seller_id")
@@ -54,11 +108,15 @@ model Deal {
   buyer  User @relation("buyerDeals", fields: [buyerId], references: [id])
   seller User @relation("sellerDeals", fields: [sellerId], references: [id])
 
-  messages Message[]
-  escrow   Escrow?
-  payments Payment[]
-  disputes Dispute[]
-  audits   AuditLog[]
+  messages     Message[]
+  escrow       Escrow?
+  payments     Payment[]
+  disputes     Dispute[]
+  audits       AuditLog[]
+  transactions Transaction[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([buyerId])
   @@index([sellerId])
@@ -67,12 +125,13 @@ model Deal {
 }
 
 model Message {
-  id        Int         @id @default(autoincrement())
-  dealId    Int         @map("deal_id")
-  senderId  Int?        @map("sender_id")
-  content   String
-  type      MessageType
-  createdAt DateTime    @default(now()) @map("created_at")
+  id       Int         @id @default(autoincrement())
+  dealId   Int         @map("deal_id")
+  senderId Int?        @map("sender_id")
+  content  String
+  type     MessageType
+
+  createdAt DateTime @default(now()) @map("created_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
@@ -81,10 +140,13 @@ model Message {
 }
 
 model Escrow {
-  id     Int          @id @default(autoincrement())
-  dealId Int          @unique @map("deal_id")
+  id     Int @id @default(autoincrement())
+  dealId Int @unique @map("deal_id")
+
   amount Float
   status EscrowStatus @default(HELD)
+
+  releasedAt DateTime? @map("released_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
@@ -92,16 +154,22 @@ model Escrow {
 }
 
 model Payment {
-  id     Int           @id @default(autoincrement())
-  dealId Int           @map("deal_id")
-  trxId  String        @map("trx_id")
-  method PaymentMethod
+  id     Int @id @default(autoincrement())
+  dealId Int @map("deal_id")
+
+  trxId           String @map("trx_id")
+  paymentMethodId Int    @map("payment_method_id")
+
+  method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
   status PaymentStatus @default(PENDING)
 
   idempotencyKey String? @unique @map("idempotency_key")
 
   ipAddress  String? @map("ip_address")
   deviceInfo String? @map("device_info")
+
+  verifiedBy Int?      @map("verified_by") // admin id
+  verifiedAt DateTime? @map("verified_at")
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -112,12 +180,34 @@ model Payment {
   @@map("payments")
 }
 
+model PaymentMethod {
+  id   Int    @id @default(autoincrement())
+  name String @unique // BKASH, NAGAD
+  type String // MOBILE_BANKING, CARD, BANK
+
+  isActive Boolean @default(true) @map("is_active")
+
+  // dynamic config (number, api key etc)
+  config Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  payments Payment[]
+
+  @@map("payment_methods")
+}
+
 model Dispute {
-  id        Int           @id @default(autoincrement())
-  dealId    Int           @map("deal_id")
-  reason    String
-  status    DisputeStatus @default(OPEN)
-  createdAt DateTime      @default(now()) @map("created_at")
+  id     Int @id @default(autoincrement())
+  dealId Int @map("deal_id")
+
+  reason String
+  status DisputeStatus @default(OPEN)
+
+  resolvedBy Int?      @map("resolved_by")
+  resolvedAt DateTime? @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
@@ -126,15 +216,19 @@ model Dispute {
 }
 
 model AuditLog {
-  id     Int  @id @default(autoincrement())
+  id Int @id @default(autoincrement())
+
   dealId Int? @map("deal_id")
   userId Int? @map("user_id")
 
-  action String // e.g. "PAYMENT_VERIFIED"
-  meta   Json? // store extra info
+  action String
+  meta   Json?
+
+  ipAddress String? @map("ip_address")
 
   createdAt DateTime @default(now()) @map("created_at")
-  deal      Deal?    @relation(fields: [dealId], references: [id])
+
+  deal Deal? @relation(fields: [dealId], references: [id])
 
   @@index([dealId])
   @@index([userId])
@@ -142,13 +236,16 @@ model AuditLog {
 }
 
 model Transaction {
-  id     Int             @id @default(autoincrement())
-  dealId Int             @map("deal_id")
+  id     Int @id @default(autoincrement())
+  dealId Int @map("deal_id")
+
   type   TransactionType
   amount Float
 
-  reference String? // external ref
+  reference String?
   createdAt DateTime @default(now()) @map("created_at")
+
+  deal Deal @relation(fields: [dealId], references: [id])
 
   @@index([dealId])
   @@map("transactions")
@@ -168,12 +265,6 @@ enum EscrowStatus {
   HELD
   RELEASED
   REFUNDED
-}
-
-enum PaymentMethod {
-  BKASH
-  NAGAD
-  ROCKET
 }
 
 enum PaymentStatus {

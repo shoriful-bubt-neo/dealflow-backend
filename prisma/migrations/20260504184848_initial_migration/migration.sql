@@ -1,14 +1,8 @@
 -- CreateEnum
-CREATE TYPE "UserRole" AS ENUM ('USER', 'ADMIN');
-
--- CreateEnum
 CREATE TYPE "DealStatus" AS ENUM ('CREATED', 'AWAITING_PAYMENT', 'PAID', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED');
 
 -- CreateEnum
 CREATE TYPE "EscrowStatus" AS ENUM ('HELD', 'RELEASED', 'REFUNDED');
-
--- CreateEnum
-CREATE TYPE "PaymentMethod" AS ENUM ('BKASH', 'NAGAD', 'ROCKET');
 
 -- CreateEnum
 CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'VERIFIED', 'FAILED');
@@ -26,11 +20,50 @@ CREATE TYPE "TransactionType" AS ENUM ('PAYMENT_RECEIVED', 'ESCROW_HELD', 'ESCRO
 CREATE TABLE "users" (
     "id" SERIAL NOT NULL,
     "phone" TEXT NOT NULL,
+    "password" TEXT,
     "is_verified" BOOLEAN NOT NULL DEFAULT false,
-    "role" "UserRole" NOT NULL DEFAULT 'USER',
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "last_login_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "roles" (
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "permissions" (
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "permissions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "user_roles" (
+    "id" SERIAL NOT NULL,
+    "user_id" INTEGER NOT NULL,
+    "role_id" INTEGER NOT NULL,
+
+    CONSTRAINT "user_roles_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "role_permissions" (
+    "id" SERIAL NOT NULL,
+    "role_id" INTEGER NOT NULL,
+    "permission_id" INTEGER NOT NULL,
+
+    CONSTRAINT "role_permissions_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -40,6 +73,7 @@ CREATE TABLE "otps" (
     "code" TEXT NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
     "is_used" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "otps_pkey" PRIMARY KEY ("id")
 );
@@ -50,9 +84,10 @@ CREATE TABLE "deals" (
     "amount" DOUBLE PRECISION NOT NULL,
     "status" "DealStatus" NOT NULL DEFAULT 'CREATED',
     "payment_ref" TEXT NOT NULL,
-    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "buyer_id" INTEGER NOT NULL,
     "seller_id" INTEGER NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "deals_pkey" PRIMARY KEY ("id")
 );
@@ -75,6 +110,7 @@ CREATE TABLE "escrows" (
     "deal_id" INTEGER NOT NULL,
     "amount" DOUBLE PRECISION NOT NULL,
     "status" "EscrowStatus" NOT NULL DEFAULT 'HELD',
+    "released_at" TIMESTAMP(3),
 
     CONSTRAINT "escrows_pkey" PRIMARY KEY ("id")
 );
@@ -84,14 +120,28 @@ CREATE TABLE "payments" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
     "trx_id" TEXT NOT NULL,
-    "method" "PaymentMethod" NOT NULL,
+    "payment_method_id" INTEGER NOT NULL,
     "status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
     "idempotency_key" TEXT,
     "ip_address" TEXT,
     "device_info" TEXT,
+    "verified_by" INTEGER,
+    "verified_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "payment_methods" (
+    "id" SERIAL NOT NULL,
+    "name" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "config" JSONB,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "payment_methods_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -100,6 +150,8 @@ CREATE TABLE "disputes" (
     "deal_id" INTEGER NOT NULL,
     "reason" TEXT NOT NULL,
     "status" "DisputeStatus" NOT NULL DEFAULT 'OPEN',
+    "resolved_by" INTEGER,
+    "resolved_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "disputes_pkey" PRIMARY KEY ("id")
@@ -112,6 +164,7 @@ CREATE TABLE "audit_logs" (
     "user_id" INTEGER,
     "action" TEXT NOT NULL,
     "meta" JSONB,
+    "ip_address" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
@@ -131,6 +184,27 @@ CREATE TABLE "transactions" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "users_phone_key" ON "users"("phone");
+
+-- CreateIndex
+CREATE INDEX "users_phone_idx" ON "users"("phone");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "roles_name_key" ON "roles"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "permissions_name_key" ON "permissions"("name");
+
+-- CreateIndex
+CREATE INDEX "user_roles_role_id_idx" ON "user_roles"("role_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "user_roles_user_id_role_id_key" ON "user_roles"("user_id", "role_id");
+
+-- CreateIndex
+CREATE INDEX "role_permissions_permission_id_idx" ON "role_permissions"("permission_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "role_permissions_role_id_permission_id_key" ON "role_permissions"("role_id", "permission_id");
 
 -- CreateIndex
 CREATE INDEX "otps_phone_idx" ON "otps"("phone");
@@ -163,6 +237,9 @@ CREATE INDEX "payments_deal_id_idx" ON "payments"("deal_id");
 CREATE INDEX "payments_trx_id_idx" ON "payments"("trx_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "payment_methods_name_key" ON "payment_methods"("name");
+
+-- CreateIndex
 CREATE INDEX "disputes_deal_id_idx" ON "disputes"("deal_id");
 
 -- CreateIndex
@@ -173,6 +250,18 @@ CREATE INDEX "audit_logs_user_id_idx" ON "audit_logs"("user_id");
 
 -- CreateIndex
 CREATE INDEX "transactions_deal_id_idx" ON "transactions"("deal_id");
+
+-- AddForeignKey
+ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "permissions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "deals" ADD CONSTRAINT "deals_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -187,6 +276,9 @@ ALTER TABLE "messages" ADD CONSTRAINT "messages_deal_id_fkey" FOREIGN KEY ("deal
 ALTER TABLE "escrows" ADD CONSTRAINT "escrows_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "payments" ADD CONSTRAINT "payments_payment_method_id_fkey" FOREIGN KEY ("payment_method_id") REFERENCES "payment_methods"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -194,3 +286,6 @@ ALTER TABLE "disputes" ADD CONSTRAINT "disputes_deal_id_fkey" FOREIGN KEY ("deal
 
 -- AddForeignKey
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
