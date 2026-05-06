@@ -1,10 +1,4 @@
 -- CreateEnum
-CREATE TYPE "UserType" AS ENUM ('ADMIN', 'BUYER', 'SELLER');
-
--- CreateEnum
-CREATE TYPE "UserStatus" AS ENUM ('PENDING_VERIFICATION', 'VERIFIED', 'SUSPENDED', 'CLOSED');
-
--- CreateEnum
 CREATE TYPE "DealStatus" AS ENUM ('CREATED', 'AWAITING_PAYMENT', 'PAID', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED');
 
 -- CreateEnum
@@ -21,6 +15,18 @@ CREATE TYPE "DisputeStatus" AS ENUM ('OPEN', 'RESOLVED', 'REJECTED');
 
 -- CreateEnum
 CREATE TYPE "TransactionType" AS ENUM ('PAYMENT_RECEIVED', 'ESCROW_HELD', 'ESCROW_RELEASED', 'REFUND');
+
+-- CreateEnum
+CREATE TYPE "ChargeType" AS ENUM ('PERCENTAGE', 'FIXED');
+
+-- CreateEnum
+CREATE TYPE "ChargePayer" AS ENUM ('BUYER', 'SELLER', 'SPLIT');
+
+-- CreateEnum
+CREATE TYPE "UserType" AS ENUM ('ADMIN', 'BUYER', 'SELLER');
+
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('PENDING_VERIFICATION', 'VERIFIED', 'SUSPENDED', 'CLOSED');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -98,7 +104,7 @@ CREATE TABLE "otps" (
 -- CreateTable
 CREATE TABLE "deals" (
     "id" SERIAL NOT NULL,
-    "amount" DECIMAL(65,30) NOT NULL,
+    "amount" DECIMAL(18,2) NOT NULL,
     "status" "DealStatus" NOT NULL DEFAULT 'CREATED',
     "payment_ref" TEXT NOT NULL,
     "buyer_id" INTEGER NOT NULL,
@@ -125,9 +131,10 @@ CREATE TABLE "messages" (
 CREATE TABLE "escrows" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
-    "amount" DECIMAL(65,30) NOT NULL,
+    "amount" DECIMAL(18,2) NOT NULL,
     "status" "EscrowStatus" NOT NULL DEFAULT 'HELD',
     "released_at" TIMESTAMP(3),
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "escrows_pkey" PRIMARY KEY ("id")
 );
@@ -145,6 +152,7 @@ CREATE TABLE "payments" (
     "verified_by" INTEGER,
     "verified_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "payments_pkey" PRIMARY KEY ("id")
 );
@@ -162,6 +170,38 @@ CREATE TABLE "payment_methods" (
 );
 
 -- CreateTable
+CREATE TABLE "service_charge_configs" (
+    "id" SERIAL NOT NULL,
+    "payment_method_id" INTEGER NOT NULL,
+    "type" "ChargeType" NOT NULL,
+    "percentage" DECIMAL(5,2),
+    "fixedAmount" DECIMAL(18,2),
+    "payer" "ChargePayer" NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "service_charge_configs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "deal_charges" (
+    "id" SERIAL NOT NULL,
+    "deal_id" INTEGER NOT NULL,
+    "base_amount" DECIMAL(18,2) NOT NULL,
+    "charge_type" "ChargeType" NOT NULL,
+    "charge_value" DECIMAL(18,2) NOT NULL,
+    "total_charge" DECIMAL(18,2) NOT NULL,
+    "payer" "ChargePayer" NOT NULL,
+    "buyer_pays" DECIMAL(18,2) NOT NULL,
+    "seller_pays" DECIMAL(18,2) NOT NULL,
+    "buyer_total" DECIMAL(18,2) NOT NULL,
+    "seller_receives" DECIMAL(18,2) NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "deal_charges_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "disputes" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
@@ -170,6 +210,7 @@ CREATE TABLE "disputes" (
     "resolved_by" INTEGER,
     "resolved_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "disputes_pkey" PRIMARY KEY ("id")
 );
@@ -180,8 +221,10 @@ CREATE TABLE "audit_logs" (
     "deal_id" INTEGER,
     "user_id" INTEGER,
     "action" TEXT NOT NULL,
-    "meta" JSONB,
+    "entity_type" TEXT NOT NULL,
+    "entity_id" INTEGER,
     "ip_address" TEXT,
+    "meta" JSONB,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
@@ -192,7 +235,7 @@ CREATE TABLE "transactions" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
     "type" "TransactionType" NOT NULL,
-    "amount" DECIMAL(65,30) NOT NULL,
+    "amount" DECIMAL(18,2) NOT NULL,
     "reference" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -207,12 +250,6 @@ CREATE INDEX "users_phone_idx" ON "users"("phone");
 
 -- CreateIndex
 CREATE INDEX "users_type_status_idx" ON "users"("type", "status");
-
--- CreateIndex
-CREATE INDEX "users_is_active_idx" ON "users"("is_active");
-
--- CreateIndex
-CREATE UNIQUE INDEX "roles_name_key" ON "roles"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_name_key" ON "permissions"("name");
@@ -254,25 +291,34 @@ CREATE INDEX "messages_deal_id_idx" ON "messages"("deal_id");
 CREATE UNIQUE INDEX "escrows_deal_id_key" ON "escrows"("deal_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "payments_trx_id_key" ON "payments"("trx_id");
+CREATE INDEX "payments_deal_id_status_idx" ON "payments"("deal_id", "status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "payments_idempotency_key_key" ON "payments"("idempotency_key");
+CREATE INDEX "payments_payment_method_id_created_at_idx" ON "payments"("payment_method_id", "created_at");
 
 -- CreateIndex
-CREATE INDEX "payments_deal_id_idx" ON "payments"("deal_id");
+CREATE UNIQUE INDEX "payments_deal_id_idempotency_key_key" ON "payments"("deal_id", "idempotency_key");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "payments_trx_id_payment_method_id_key" ON "payments"("trx_id", "payment_method_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "payment_methods_name_key" ON "payment_methods"("name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "service_charge_configs_payment_method_id_key" ON "service_charge_configs"("payment_method_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "deal_charges_deal_id_key" ON "deal_charges"("deal_id");
+
+-- CreateIndex
 CREATE INDEX "disputes_deal_id_idx" ON "disputes"("deal_id");
 
 -- CreateIndex
-CREATE INDEX "audit_logs_deal_id_idx" ON "audit_logs"("deal_id");
+CREATE INDEX "audit_logs_deal_id_created_at_idx" ON "audit_logs"("deal_id", "created_at");
 
 -- CreateIndex
-CREATE INDEX "audit_logs_user_id_idx" ON "audit_logs"("user_id");
+CREATE INDEX "audit_logs_user_id_created_at_idx" ON "audit_logs"("user_id", "created_at");
 
 -- CreateIndex
 CREATE INDEX "transactions_deal_id_idx" ON "transactions"("deal_id");
@@ -299,13 +345,28 @@ ALTER TABLE "deals" ADD CONSTRAINT "deals_seller_id_fkey" FOREIGN KEY ("seller_i
 ALTER TABLE "messages" ADD CONSTRAINT "messages_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "messages" ADD CONSTRAINT "messages_sender_id_fkey" FOREIGN KEY ("sender_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "escrows" ADD CONSTRAINT "escrows_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_payment_method_id_fkey" FOREIGN KEY ("payment_method_id") REFERENCES "payment_methods"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "payments" ADD CONSTRAINT "payments_verified_by_fkey" FOREIGN KEY ("verified_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "payments" ADD CONSTRAINT "payments_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "service_charge_configs" ADD CONSTRAINT "service_charge_configs_payment_method_id_fkey" FOREIGN KEY ("payment_method_id") REFERENCES "payment_methods"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "deal_charges" ADD CONSTRAINT "deal_charges_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disputes" ADD CONSTRAINT "disputes_resolved_by_fkey" FOREIGN KEY ("resolved_by") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "disputes" ADD CONSTRAINT "disputes_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../src/generated/prisma"
@@ -11,6 +6,8 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// USER & AUTH
 
 model User {
   id         Int     @id @default(autoincrement())
@@ -22,7 +19,7 @@ model User {
 
   // ADMIN users can access panel and use RBAC roles.
   // BUYER/SELLER users are OTP-first and typically do not use password login.
-  type UserType @default(BUYER)
+  type   UserType   @default(BUYER)
   status UserStatus @default(PENDING_VERIFICATION)
 
   isActive    Boolean   @default(true) @map("is_active")
@@ -31,7 +28,6 @@ model User {
   lastOtpAt   DateTime? @map("last_otp_at")
   otpAttempts Int       @default(0) @map("otp_attempts")
   otpLockedUntil DateTime? @map("otp_locked_until")
-
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -41,16 +37,20 @@ model User {
   dealsAsBuyer  Deal[] @relation("buyerDeals")
   dealsAsSeller Deal[] @relation("sellerDeals")
 
+  sentMessages Message[] @relation("MessageSender")
+
+  verifiedPayments Payment[] @relation("verifiedBy")
+  resolvedDisputes Dispute[] @relation("resolvedBy")
+
   @@index([phone])
   @@index([type, status])
-  @@index([isActive])
   @@map("users")
 }
 
 model Role {
   id        Int      @id @default(autoincrement())
-  name      String   @unique
-  isActive    Boolean   @default(true) @map("is_active")
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
   users       UserRole[]
@@ -97,6 +97,8 @@ model RolePermission {
   @@map("role_permissions")
 }
 
+// OTP
+
 model OTP {
   id        Int      @id @default(autoincrement())
   phone     String
@@ -112,22 +114,11 @@ model OTP {
   @@map("otps")
 }
 
-enum UserType {
-  ADMIN
-  BUYER
-  SELLER
-}
-
-enum UserStatus {
-  PENDING_VERIFICATION
-  VERIFIED
-  SUSPENDED
-  CLOSED
-}
+// DEAL CORE
 
 model Deal {
   id     Int        @id @default(autoincrement())
-  amount Decimal
+  amount Decimal    @db.Decimal(18, 2)
   status DealStatus @default(CREATED)
 
   paymentRef String @unique @map("payment_ref")
@@ -144,6 +135,7 @@ model Deal {
   disputes     Dispute[]
   audits       AuditLog[]
   transactions Transaction[]
+  charge       DealCharge?
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -163,49 +155,64 @@ model Message {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  deal Deal @relation(fields: [dealId], references: [id])
+  deal   Deal @relation(fields: [dealId], references: [id])
+  sender User? @relation("MessageSender", fields: [senderId], references: [id])
 
   @@index([dealId])
   @@map("messages")
 }
 
-model Escrow {
-  id     Int @id @default(autoincrement())
-  dealId Int @unique @map("deal_id")
+// ESCROW
 
-  amount Decimal
+model Escrow {
+  id     Int     @id @default(autoincrement())
+  dealId Int     @unique @map("deal_id")
+
+  amount Decimal @db.Decimal(18, 2)
   status EscrowStatus @default(HELD)
 
   releasedAt DateTime? @map("released_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
   @@map("escrows")
 }
 
+// PAYMENT SYSTEM
+
 model Payment {
   id     Int @id @default(autoincrement())
   dealId Int @map("deal_id")
 
-  trxId           String @unique @map("trx_id")
-  paymentMethodId Int    @map("payment_method_id")
+  trxId String @map("trx_id")
 
+  paymentMethodId Int @map("payment_method_id")
   method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
   status PaymentStatus @default(PENDING)
 
-  idempotencyKey String @unique @map("idempotency_key")
+  idempotencyKey String @map("idempotency_key")
 
   ipAddress  String? @map("ip_address")
   deviceInfo String? @map("device_info")
 
-  verifiedBy Int?      @map("verified_by") // admin id
+  verifiedBy Int? @map("verified_by")
+  verifiedByUser User? @relation("verifiedBy", fields: [verifiedBy], references: [id])
+
   verifiedAt DateTime? @map("verified_at")
 
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
-  @@index([dealId])
+  @@unique([dealId, idempotencyKey])
+  @@unique([trxId, paymentMethodId])
+
+  @@index([dealId, status])
+  @@index([paymentMethodId, createdAt])
+
   @@map("payments")
 }
 
@@ -215,16 +222,66 @@ model PaymentMethod {
   type String // MOBILE_BANKING, CARD, BANK
 
   isActive Boolean @default(true) @map("is_active")
-
   // dynamic config (number, api key etc)
   config Json?
 
   createdAt DateTime @default(now()) @map("created_at")
 
   payments Payment[]
+  charges  ServiceChargeConfig[]
 
   @@map("payment_methods")
 }
+
+// SERVICE CHARGE SYSTEM
+
+model ServiceChargeConfig {
+  id Int @id @default(autoincrement())
+
+  paymentMethodId Int @map("payment_method_id")
+  method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+
+  type ChargeType
+  percentage Decimal? @db.Decimal(5,2)
+  fixedAmount Decimal? @db.Decimal(18,2)
+
+  payer ChargePayer
+
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([paymentMethodId])
+  @@map("service_charge_configs")
+}
+
+model DealCharge {
+  id Int @id @default(autoincrement())
+
+  dealId Int @unique @map("deal_id")
+  deal Deal @relation(fields: [dealId], references: [id])
+
+  baseAmount Decimal @db.Decimal(18,2) @map("base_amount")
+
+  chargeType ChargeType @map("charge_type")
+  chargeValue Decimal @db.Decimal(18,2) @map("charge_value")
+
+  totalCharge Decimal @db.Decimal(18,2) @map("total_charge")
+
+  payer ChargePayer
+
+  buyerPays Decimal @db.Decimal(18,2) @map("buyer_pays")
+  sellerPays Decimal @db.Decimal(18,2) @map("seller_pays")
+
+  buyerTotal Decimal @db.Decimal(18,2) @map("buyer_total")
+  sellerReceives Decimal @db.Decimal(18,2) @map("seller_receives")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("deal_charges")
+}
+
+// DISPUTE
 
 model Dispute {
   id     Int @id @default(autoincrement())
@@ -233,16 +290,21 @@ model Dispute {
   reason String
   status DisputeStatus @default(OPEN)
 
-  resolvedBy Int?      @map("resolved_by")
+  resolvedBy Int? @map("resolved_by")
+  resolvedByUser User? @relation("resolvedBy", fields: [resolvedBy], references: [id])
+
   resolvedAt DateTime? @map("resolved_at")
 
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
   @@index([dealId])
   @@map("disputes")
 }
+
+// AUDIT LOG
 
 model AuditLog {
   id Int @id @default(autoincrement())
@@ -251,27 +313,32 @@ model AuditLog {
   userId Int? @map("user_id")
 
   action String
-  meta   Json?
+  entityType String @map("entity_type")
+  entityId Int? @map("entity_id")
 
   ipAddress String? @map("ip_address")
+  meta Json?
 
   createdAt DateTime @default(now()) @map("created_at")
 
   deal Deal? @relation(fields: [dealId], references: [id])
 
-  @@index([dealId])
-  @@index([userId])
+  @@index([dealId, createdAt])
+  @@index([userId, createdAt])
   @@map("audit_logs")
 }
+
+// TRANSACTION LEDGER
 
 model Transaction {
   id     Int @id @default(autoincrement())
   dealId Int @map("deal_id")
 
   type   TransactionType
-  amount Decimal
+  amount Decimal @db.Decimal(18,2)
 
   reference String?
+
   createdAt DateTime @default(now()) @map("created_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
@@ -279,6 +346,8 @@ model Transaction {
   @@index([dealId])
   @@map("transactions")
 }
+
+// ENUMS
 
 enum DealStatus {
   CREATED
@@ -318,4 +387,28 @@ enum TransactionType {
   ESCROW_HELD
   ESCROW_RELEASED
   REFUND
+}
+
+enum ChargeType {
+  PERCENTAGE
+  FIXED
+}
+
+enum ChargePayer {
+  BUYER
+  SELLER
+  SPLIT
+}
+
+enum UserType {
+  ADMIN
+  BUYER
+  SELLER
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SUSPENDED
+  CLOSED
 }
