@@ -14,15 +14,27 @@ datasource db {
 
 model User {
   id         Int     @id @default(autoincrement())
+  name       String?
   phone      String  @unique
   password   String?
   isVerified Boolean @default(false) @map("is_verified")
+  phoneVerifiedAt DateTime? @map("phone_verified_at")
+
+  // ADMIN users can access panel and use RBAC roles.
+  // BUYER/SELLER users are OTP-first and typically do not use password login.
+  type UserType @default(BUYER)
+  status UserStatus @default(PENDING_VERIFICATION)
 
   isActive    Boolean   @default(true) @map("is_active")
+  blockedAt   DateTime? @map("blocked_at")
   lastLoginAt DateTime? @map("last_login_at")
+  lastOtpAt   DateTime? @map("last_otp_at")
+  otpAttempts Int       @default(0) @map("otp_attempts")
+  otpLockedUntil DateTime? @map("otp_locked_until")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   roles UserRole[]
 
@@ -30,12 +42,15 @@ model User {
   dealsAsSeller Deal[] @relation("sellerDeals")
 
   @@index([phone])
+  @@index([type, status])
+  @@index([isActive])
   @@map("users")
 }
 
 model Role {
   id        Int      @id @default(autoincrement())
   name      String   @unique
+  isActive    Boolean   @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
 
   users       UserRole[]
@@ -88,16 +103,31 @@ model OTP {
   code      String
   expiresAt DateTime @map("expires_at")
   isUsed    Boolean  @default(false) @map("is_used")
+  attempts  Int      @default(0)
 
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([phone])
+  @@index([phone, isUsed, expiresAt])
   @@map("otps")
+}
+
+enum UserType {
+  ADMIN
+  BUYER
+  SELLER
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  VERIFIED
+  SUSPENDED
+  CLOSED
 }
 
 model Deal {
   id     Int        @id @default(autoincrement())
-  amount Float
+  amount Decimal
   status DealStatus @default(CREATED)
 
   paymentRef String @unique @map("payment_ref")
@@ -143,7 +173,7 @@ model Escrow {
   id     Int @id @default(autoincrement())
   dealId Int @unique @map("deal_id")
 
-  amount Float
+  amount Decimal
   status EscrowStatus @default(HELD)
 
   releasedAt DateTime? @map("released_at")
@@ -157,13 +187,13 @@ model Payment {
   id     Int @id @default(autoincrement())
   dealId Int @map("deal_id")
 
-  trxId           String @map("trx_id")
+  trxId           String @unique @map("trx_id")
   paymentMethodId Int    @map("payment_method_id")
 
   method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
   status PaymentStatus @default(PENDING)
 
-  idempotencyKey String? @unique @map("idempotency_key")
+  idempotencyKey String @unique @map("idempotency_key")
 
   ipAddress  String? @map("ip_address")
   deviceInfo String? @map("device_info")
@@ -176,7 +206,6 @@ model Payment {
   deal Deal @relation(fields: [dealId], references: [id])
 
   @@index([dealId])
-  @@index([trxId])
   @@map("payments")
 }
 
@@ -240,7 +269,7 @@ model Transaction {
   dealId Int @map("deal_id")
 
   type   TransactionType
-  amount Float
+  amount Decimal
 
   reference String?
   createdAt DateTime @default(now()) @map("created_at")

@@ -1,4 +1,10 @@
 -- CreateEnum
+CREATE TYPE "UserType" AS ENUM ('ADMIN', 'BUYER', 'SELLER');
+
+-- CreateEnum
+CREATE TYPE "UserStatus" AS ENUM ('PENDING_VERIFICATION', 'VERIFIED', 'SUSPENDED', 'CLOSED');
+
+-- CreateEnum
 CREATE TYPE "DealStatus" AS ENUM ('CREATED', 'AWAITING_PAYMENT', 'PAID', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED');
 
 -- CreateEnum
@@ -19,13 +25,22 @@ CREATE TYPE "TransactionType" AS ENUM ('PAYMENT_RECEIVED', 'ESCROW_HELD', 'ESCRO
 -- CreateTable
 CREATE TABLE "users" (
     "id" SERIAL NOT NULL,
+    "name" TEXT,
     "phone" TEXT NOT NULL,
     "password" TEXT,
     "is_verified" BOOLEAN NOT NULL DEFAULT false,
+    "phone_verified_at" TIMESTAMP(3),
+    "type" "UserType" NOT NULL DEFAULT 'BUYER',
+    "status" "UserStatus" NOT NULL DEFAULT 'PENDING_VERIFICATION',
     "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "blocked_at" TIMESTAMP(3),
     "last_login_at" TIMESTAMP(3),
+    "last_otp_at" TIMESTAMP(3),
+    "otp_attempts" INTEGER NOT NULL DEFAULT 0,
+    "otp_locked_until" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
+    "deleted_at" TIMESTAMP(3),
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
 );
@@ -34,6 +49,7 @@ CREATE TABLE "users" (
 CREATE TABLE "roles" (
     "id" SERIAL NOT NULL,
     "name" TEXT NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "roles_pkey" PRIMARY KEY ("id")
@@ -73,6 +89,7 @@ CREATE TABLE "otps" (
     "code" TEXT NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
     "is_used" BOOLEAN NOT NULL DEFAULT false,
+    "attempts" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "otps_pkey" PRIMARY KEY ("id")
@@ -81,7 +98,7 @@ CREATE TABLE "otps" (
 -- CreateTable
 CREATE TABLE "deals" (
     "id" SERIAL NOT NULL,
-    "amount" DOUBLE PRECISION NOT NULL,
+    "amount" DECIMAL(65,30) NOT NULL,
     "status" "DealStatus" NOT NULL DEFAULT 'CREATED',
     "payment_ref" TEXT NOT NULL,
     "buyer_id" INTEGER NOT NULL,
@@ -108,7 +125,7 @@ CREATE TABLE "messages" (
 CREATE TABLE "escrows" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
-    "amount" DOUBLE PRECISION NOT NULL,
+    "amount" DECIMAL(65,30) NOT NULL,
     "status" "EscrowStatus" NOT NULL DEFAULT 'HELD',
     "released_at" TIMESTAMP(3),
 
@@ -122,7 +139,7 @@ CREATE TABLE "payments" (
     "trx_id" TEXT NOT NULL,
     "payment_method_id" INTEGER NOT NULL,
     "status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
-    "idempotency_key" TEXT,
+    "idempotency_key" TEXT NOT NULL,
     "ip_address" TEXT,
     "device_info" TEXT,
     "verified_by" INTEGER,
@@ -175,7 +192,7 @@ CREATE TABLE "transactions" (
     "id" SERIAL NOT NULL,
     "deal_id" INTEGER NOT NULL,
     "type" "TransactionType" NOT NULL,
-    "amount" DOUBLE PRECISION NOT NULL,
+    "amount" DECIMAL(65,30) NOT NULL,
     "reference" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -187,6 +204,12 @@ CREATE UNIQUE INDEX "users_phone_key" ON "users"("phone");
 
 -- CreateIndex
 CREATE INDEX "users_phone_idx" ON "users"("phone");
+
+-- CreateIndex
+CREATE INDEX "users_type_status_idx" ON "users"("type", "status");
+
+-- CreateIndex
+CREATE INDEX "users_is_active_idx" ON "users"("is_active");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "roles_name_key" ON "roles"("name");
@@ -210,6 +233,9 @@ CREATE UNIQUE INDEX "role_permissions_role_id_permission_id_key" ON "role_permis
 CREATE INDEX "otps_phone_idx" ON "otps"("phone");
 
 -- CreateIndex
+CREATE INDEX "otps_phone_is_used_expires_at_idx" ON "otps"("phone", "is_used", "expires_at");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "deals_payment_ref_key" ON "deals"("payment_ref");
 
 -- CreateIndex
@@ -228,13 +254,13 @@ CREATE INDEX "messages_deal_id_idx" ON "messages"("deal_id");
 CREATE UNIQUE INDEX "escrows_deal_id_key" ON "escrows"("deal_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "payments_trx_id_key" ON "payments"("trx_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "payments_idempotency_key_key" ON "payments"("idempotency_key");
 
 -- CreateIndex
 CREATE INDEX "payments_deal_id_idx" ON "payments"("deal_id");
-
--- CreateIndex
-CREATE INDEX "payments_trx_id_idx" ON "payments"("trx_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "payment_methods_name_key" ON "payment_methods"("name");
