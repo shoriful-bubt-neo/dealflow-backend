@@ -3,6 +3,8 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import roleRoutes from "./api/v1/role/role.route.js";
+import userRoutes from "./api/v1/user/user.route.js";
+import paymentMethodRoutes from "./api/v1/paymentMethod/paymentMethod.route.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import prisma from "./config/prisma.js";
 
@@ -13,23 +15,17 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(express.json());
 
+// routes
 app.use("/api/v1/roles", roleRoutes);
+app.use("/api/v1/users", userRoutes);
+app.use("/api/v1/payment-methods", paymentMethodRoutes);
 
+// middlewares
 app.use(globalErrorHandler);
 
+// starting point
 app.get("/", (req, res) => {
     res.send("DealFlow API running...");
 });
-
-app.get("/users", async (req, res) => {
-    try {
-        const users = await prisma.user.findMany();
-        res.json(users);
-    } catch (error) {
-        res.status(500).json({
-            error: "Something went wrong!"
-        })
-    }
-})
 
 export default app;
