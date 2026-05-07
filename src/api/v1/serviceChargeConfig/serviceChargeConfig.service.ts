@@ -26,7 +26,14 @@ const getServiceChargeConfigs = async () => {
     return prisma.serviceChargeConfig.findMany({
         orderBy: { createdAt: "desc" },
         include: {
-            method: true,
+            method: {
+                select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    isActive: true,
+                },
+            },
         },
     });
 };
@@ -35,7 +42,14 @@ const getSingleServiceChargeConfig = async (id: number) => {
     return prisma.serviceChargeConfig.findUnique({
         where: { id },
         include: {
-            method: true,
+            method: {
+                select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    isActive: true,
+                },
+            },
         },
     });
 };
