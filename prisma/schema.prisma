@@ -10,11 +10,11 @@ datasource db {
 // USER & AUTH
 
 model User {
-  id         Int     @id @default(autoincrement())
-  name       String?
-  phone      String  @unique
-  password   String?
-  isVerified Boolean @default(false) @map("is_verified")
+  id              Int       @id @default(autoincrement())
+  name            String?
+  phone           String    @unique
+  password        String?
+  isVerified      Boolean   @default(false) @map("is_verified")
   phoneVerifiedAt DateTime? @map("phone_verified_at")
 
   // ADMIN users can access panel and use RBAC roles.
@@ -22,15 +22,15 @@ model User {
   type   UserType   @default(BUYER)
   status UserStatus @default(PENDING_VERIFICATION)
 
-  isActive    Boolean   @default(true) @map("is_active")
-  blockedAt   DateTime? @map("blocked_at")
-  lastLoginAt DateTime? @map("last_login_at")
-  lastOtpAt   DateTime? @map("last_otp_at")
-  otpAttempts Int       @default(0) @map("otp_attempts")
+  isActive       Boolean   @default(true) @map("is_active")
+  blockedAt      DateTime? @map("blocked_at")
+  lastLoginAt    DateTime? @map("last_login_at")
+  lastOtpAt      DateTime? @map("last_otp_at")
+  otpAttempts    Int       @default(0) @map("otp_attempts")
   otpLockedUntil DateTime? @map("otp_locked_until")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at")
 
   roles UserRole[]
 
@@ -42,9 +42,27 @@ model User {
   verifiedPayments Payment[] @relation("verifiedBy")
   resolvedDisputes Dispute[] @relation("resolvedBy")
 
+  identities Identity[]
+
   @@index([phone])
   @@index([type, status])
   @@map("users")
+}
+
+model Identity {
+  id         String  @id @default(uuid())
+  deviceId   String  @unique // browser/device identifier
+  ip         String?
+  userAgent  String?
+  trustLevel Int     @default(0) // 0=guest,1=verified,2=trusted
+
+  // optional link to User (OTP verify করলে attach হবে)
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([deviceId])
 }
 
 model Role {
@@ -123,6 +141,10 @@ model Deal {
 
   paymentRef String @unique @map("payment_ref")
 
+  // 🔐 NEW: secure invite access (seller join করবে)
+  inviteToken     String?   @unique
+  inviteExpiresAt DateTime?
+
   buyerId  Int @map("buyer_id")
   sellerId Int @map("seller_id")
 
@@ -142,7 +164,7 @@ model Deal {
 
   @@index([buyerId])
   @@index([sellerId])
-  @@index([status])
+  @@index([status, createdAt])
   @@map("deals")
 }
 
@@ -153,9 +175,12 @@ model Message {
   content  String
   type     MessageType
 
+  // 🔥 NEW: sender type clarity
+  senderType MessageSenderType
+
   createdAt DateTime @default(now()) @map("created_at")
 
-  deal   Deal @relation(fields: [dealId], references: [id])
+  deal   Deal  @relation(fields: [dealId], references: [id])
   sender User? @relation("MessageSender", fields: [senderId], references: [id])
 
   @@index([dealId])
@@ -165,14 +190,15 @@ model Message {
 // ESCROW
 
 model Escrow {
-  id     Int     @id @default(autoincrement())
-  dealId Int     @unique @map("deal_id")
+  id     Int @id @default(autoincrement())
+  dealId Int @unique @map("deal_id")
 
-  amount Decimal @db.Decimal(18, 2)
-  status EscrowStatus @default(HELD)
-
-  releasedAt DateTime? @map("released_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  amount     Decimal      @db.Decimal(18, 2)
+  status     EscrowStatus @default(HELD)
+  // 🔥 NEW: lifecycle tracking
+  heldAt     DateTime     @default(now())
+  releasedAt DateTime?    @map("released_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
 
   deal Deal @relation(fields: [dealId], references: [id])
 
@@ -187,17 +213,23 @@ model Payment {
 
   trxId String @map("trx_id")
 
-  paymentMethodId Int @map("payment_method_id")
-  method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  paymentMethodId Int           @map("payment_method_id")
+  method          PaymentMethod @relation(fields: [paymentMethodId], references: [id])
 
   status PaymentStatus @default(PENDING)
 
   idempotencyKey String @map("idempotency_key")
 
+  // 🔥 NEW: direction (in/out)
+  direction PaymentDirection
+
   ipAddress  String? @map("ip_address")
   deviceInfo String? @map("device_info")
 
-  verifiedBy Int? @map("verified_by")
+  // 🔥 NEW: raw gateway response
+  gatewayResponse Json?
+
+  verifiedBy     Int?  @map("verified_by")
   verifiedByUser User? @relation("verifiedBy", fields: [verifiedBy], references: [id])
 
   verifiedAt DateTime? @map("verified_at")
@@ -209,10 +241,8 @@ model Payment {
 
   @@unique([dealId, idempotencyKey])
   @@unique([trxId, paymentMethodId])
-
   @@index([dealId, status])
   @@index([paymentMethodId, createdAt])
-
   @@map("payments")
 }
 
@@ -223,7 +253,7 @@ model PaymentMethod {
 
   isActive Boolean @default(true) @map("is_active")
   // dynamic config (number, api key etc)
-  config Json?
+  config   Json?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -238,16 +268,19 @@ model PaymentMethod {
 model ServiceChargeConfig {
   id Int @id @default(autoincrement())
 
-  paymentMethodId Int @map("payment_method_id")
-  method PaymentMethod @relation(fields: [paymentMethodId], references: [id])
+  paymentMethodId Int           @map("payment_method_id")
+  method          PaymentMethod @relation(fields: [paymentMethodId], references: [id])
 
-  type ChargeType
-  percentage Decimal? @db.Decimal(5,2)
-  fixedAmount Decimal? @db.Decimal(18,2)
+  type        ChargeType
+  percentage  Decimal?   @db.Decimal(5, 2)
+  fixedAmount Decimal?   @db.Decimal(18, 2)
 
   payer ChargePayer
 
   isActive Boolean @default(true) @map("is_active")
+
+  // 🔥 NEW: versioning
+  version Int @default(1)
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -258,23 +291,23 @@ model ServiceChargeConfig {
 model DealCharge {
   id Int @id @default(autoincrement())
 
-  dealId Int @unique @map("deal_id")
-  deal Deal @relation(fields: [dealId], references: [id])
+  dealId Int  @unique @map("deal_id")
+  deal   Deal @relation(fields: [dealId], references: [id])
 
-  baseAmount Decimal @db.Decimal(18,2) @map("base_amount")
+  baseAmount Decimal @map("base_amount") @db.Decimal(18, 2)
 
-  chargeType ChargeType @map("charge_type")
-  chargeValue Decimal @db.Decimal(18,2) @map("charge_value")
+  chargeType  ChargeType @map("charge_type")
+  chargeValue Decimal    @map("charge_value") @db.Decimal(18, 2)
 
-  totalCharge Decimal @db.Decimal(18,2) @map("total_charge")
+  totalCharge Decimal @map("total_charge") @db.Decimal(18, 2)
 
   payer ChargePayer
 
-  buyerPays Decimal @db.Decimal(18,2) @map("buyer_pays")
-  sellerPays Decimal @db.Decimal(18,2) @map("seller_pays")
+  buyerPays  Decimal @map("buyer_pays") @db.Decimal(18, 2)
+  sellerPays Decimal @map("seller_pays") @db.Decimal(18, 2)
 
-  buyerTotal Decimal @db.Decimal(18,2) @map("buyer_total")
-  sellerReceives Decimal @db.Decimal(18,2) @map("seller_receives")
+  buyerTotal     Decimal @map("buyer_total") @db.Decimal(18, 2)
+  sellerReceives Decimal @map("seller_receives") @db.Decimal(18, 2)
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -290,7 +323,7 @@ model Dispute {
   reason String
   status DisputeStatus @default(OPEN)
 
-  resolvedBy Int? @map("resolved_by")
+  resolvedBy     Int?  @map("resolved_by")
   resolvedByUser User? @relation("resolvedBy", fields: [resolvedBy], references: [id])
 
   resolvedAt DateTime? @map("resolved_at")
@@ -312,12 +345,15 @@ model AuditLog {
   dealId Int? @map("deal_id")
   userId Int? @map("user_id")
 
-  action String
+  action     String
   entityType String @map("entity_type")
-  entityId Int? @map("entity_id")
+  entityId   Int?   @map("entity_id")
 
   ipAddress String? @map("ip_address")
-  meta Json?
+  meta      Json?
+
+  // 🔥 NEW: device tracking
+  deviceId String?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -335,9 +371,11 @@ model Transaction {
   dealId Int @map("deal_id")
 
   type   TransactionType
-  amount Decimal @db.Decimal(18,2)
+  amount Decimal         @db.Decimal(18, 2)
 
-  reference String?
+  // 🔥 NEW: better reference tracking
+  referenceId   Int?
+  referenceType String?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -345,6 +383,18 @@ model Transaction {
 
   @@index([dealId])
   @@map("transactions")
+}
+
+model RequestLog {
+  id Int @id @default(autoincrement())
+
+  ip       String
+  deviceId String?
+  path     String
+
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
 }
 
 // ENUMS
@@ -357,6 +407,7 @@ enum DealStatus {
   COMPLETED
   DISPUTED
   CANCELLED
+  EXPIRED // 🔥 NEW
 }
 
 enum EscrowStatus {
@@ -371,9 +422,20 @@ enum PaymentStatus {
   FAILED
 }
 
+enum PaymentDirection {
+  IN
+  OUT
+}
+
 enum MessageType {
   USER
   SYSTEM
+}
+
+enum MessageSenderType {
+  USER
+  SYSTEM
+  ADMIN
 }
 
 enum DisputeStatus {

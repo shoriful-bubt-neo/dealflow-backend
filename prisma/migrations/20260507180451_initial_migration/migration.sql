@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "DealStatus" AS ENUM ('CREATED', 'AWAITING_PAYMENT', 'PAID', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED');
+CREATE TYPE "DealStatus" AS ENUM ('CREATED', 'AWAITING_PAYMENT', 'PAID', 'DELIVERED', 'COMPLETED', 'DISPUTED', 'CANCELLED', 'EXPIRED');
 
 -- CreateEnum
 CREATE TYPE "EscrowStatus" AS ENUM ('HELD', 'RELEASED', 'REFUNDED');
@@ -8,7 +8,13 @@ CREATE TYPE "EscrowStatus" AS ENUM ('HELD', 'RELEASED', 'REFUNDED');
 CREATE TYPE "PaymentStatus" AS ENUM ('PENDING', 'VERIFIED', 'FAILED');
 
 -- CreateEnum
+CREATE TYPE "PaymentDirection" AS ENUM ('IN', 'OUT');
+
+-- CreateEnum
 CREATE TYPE "MessageType" AS ENUM ('USER', 'SYSTEM');
+
+-- CreateEnum
+CREATE TYPE "MessageSenderType" AS ENUM ('USER', 'SYSTEM', 'ADMIN');
 
 -- CreateEnum
 CREATE TYPE "DisputeStatus" AS ENUM ('OPEN', 'RESOLVED', 'REJECTED');
@@ -49,6 +55,19 @@ CREATE TABLE "users" (
     "deleted_at" TIMESTAMP(3),
 
     CONSTRAINT "users_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Identity" (
+    "id" TEXT NOT NULL,
+    "deviceId" TEXT NOT NULL,
+    "ip" TEXT,
+    "userAgent" TEXT,
+    "trustLevel" INTEGER NOT NULL DEFAULT 0,
+    "userId" INTEGER,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Identity_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -107,6 +126,8 @@ CREATE TABLE "deals" (
     "amount" DECIMAL(18,2) NOT NULL,
     "status" "DealStatus" NOT NULL DEFAULT 'CREATED',
     "payment_ref" TEXT NOT NULL,
+    "inviteToken" TEXT,
+    "inviteExpiresAt" TIMESTAMP(3),
     "buyer_id" INTEGER NOT NULL,
     "seller_id" INTEGER NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -122,6 +143,7 @@ CREATE TABLE "messages" (
     "sender_id" INTEGER,
     "content" TEXT NOT NULL,
     "type" "MessageType" NOT NULL,
+    "senderType" "MessageSenderType" NOT NULL,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "messages_pkey" PRIMARY KEY ("id")
@@ -133,6 +155,7 @@ CREATE TABLE "escrows" (
     "deal_id" INTEGER NOT NULL,
     "amount" DECIMAL(18,2) NOT NULL,
     "status" "EscrowStatus" NOT NULL DEFAULT 'HELD',
+    "heldAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "released_at" TIMESTAMP(3),
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -147,8 +170,10 @@ CREATE TABLE "payments" (
     "payment_method_id" INTEGER NOT NULL,
     "status" "PaymentStatus" NOT NULL DEFAULT 'PENDING',
     "idempotency_key" TEXT NOT NULL,
+    "direction" "PaymentDirection" NOT NULL,
     "ip_address" TEXT,
     "device_info" TEXT,
+    "gatewayResponse" JSONB,
     "verified_by" INTEGER,
     "verified_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -178,6 +203,7 @@ CREATE TABLE "service_charge_configs" (
     "fixedAmount" DECIMAL(18,2),
     "payer" "ChargePayer" NOT NULL,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "version" INTEGER NOT NULL DEFAULT 1,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "service_charge_configs_pkey" PRIMARY KEY ("id")
@@ -225,6 +251,7 @@ CREATE TABLE "audit_logs" (
     "entity_id" INTEGER,
     "ip_address" TEXT,
     "meta" JSONB,
+    "deviceId" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "audit_logs_pkey" PRIMARY KEY ("id")
@@ -236,10 +263,22 @@ CREATE TABLE "transactions" (
     "deal_id" INTEGER NOT NULL,
     "type" "TransactionType" NOT NULL,
     "amount" DECIMAL(18,2) NOT NULL,
-    "reference" TEXT,
+    "referenceId" INTEGER,
+    "referenceType" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "transactions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "RequestLog" (
+    "id" SERIAL NOT NULL,
+    "ip" TEXT NOT NULL,
+    "deviceId" TEXT,
+    "path" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "RequestLog_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -250,6 +289,12 @@ CREATE INDEX "users_phone_idx" ON "users"("phone");
 
 -- CreateIndex
 CREATE INDEX "users_type_status_idx" ON "users"("type", "status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Identity_deviceId_key" ON "Identity"("deviceId");
+
+-- CreateIndex
+CREATE INDEX "Identity_deviceId_idx" ON "Identity"("deviceId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_name_key" ON "permissions"("name");
@@ -276,13 +321,16 @@ CREATE INDEX "otps_phone_is_used_expires_at_idx" ON "otps"("phone", "is_used", "
 CREATE UNIQUE INDEX "deals_payment_ref_key" ON "deals"("payment_ref");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "deals_inviteToken_key" ON "deals"("inviteToken");
+
+-- CreateIndex
 CREATE INDEX "deals_buyer_id_idx" ON "deals"("buyer_id");
 
 -- CreateIndex
 CREATE INDEX "deals_seller_id_idx" ON "deals"("seller_id");
 
 -- CreateIndex
-CREATE INDEX "deals_status_idx" ON "deals"("status");
+CREATE INDEX "deals_status_created_at_idx" ON "deals"("status", "created_at");
 
 -- CreateIndex
 CREATE INDEX "messages_deal_id_idx" ON "messages"("deal_id");
@@ -322,6 +370,12 @@ CREATE INDEX "audit_logs_user_id_created_at_idx" ON "audit_logs"("user_id", "cre
 
 -- CreateIndex
 CREATE INDEX "transactions_deal_id_idx" ON "transactions"("deal_id");
+
+-- CreateIndex
+CREATE INDEX "RequestLog_ip_createdAt_idx" ON "RequestLog"("ip", "createdAt");
+
+-- AddForeignKey
+ALTER TABLE "Identity" ADD CONSTRAINT "Identity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
