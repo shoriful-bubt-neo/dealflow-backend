@@ -1,9 +1,24 @@
 ﻿import prisma from "../../../config/prisma.js";
 import type { CreateServiceChargeConfigPayload, UpdateServiceChargeConfigPayload } from "./serviceChargeConfig.types.js";
 
-const createServiceChargeConfig = async (payload: CreateServiceChargeConfigPayload) => {
+const createServiceChargeConfig = async (
+    payload: CreateServiceChargeConfigPayload
+) => {
+    const data = {
+        ...payload,
+        percentage:
+            payload.type === "PERCENTAGE"
+                ? payload.percentage
+                : null,
+
+        fixedAmount:
+            payload.type === "FIXED"
+                ? payload.fixedAmount
+                : null,
+    };
+
     return prisma.serviceChargeConfig.create({
-        data: payload,
+        data,
     });
 };
 
@@ -25,10 +40,25 @@ const getSingleServiceChargeConfig = async (id: number) => {
     });
 };
 
-const updateServiceChargeConfig = async (id: number, payload: UpdateServiceChargeConfigPayload) => {
+const updateServiceChargeConfig = async (
+    id: number,
+    payload: UpdateServiceChargeConfigPayload
+) => {
+    const data = {
+        ...payload,
+    };
+
+    if (payload.type === "PERCENTAGE") {
+        data.fixedAmount = null;
+    }
+
+    if (payload.type === "FIXED") {
+        data.percentage = null;
+    }
+
     return prisma.serviceChargeConfig.update({
         where: { id },
-        data: payload,
+        data,
         include: {
             method: true,
         },
