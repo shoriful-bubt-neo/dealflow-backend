@@ -12,7 +12,7 @@ datasource db {
 model User {
   id              Int       @id @default(autoincrement())
   name            String?
-  phone           String    @unique
+  phone           String?
   password        String?
   isVerified      Boolean   @default(false) @map("is_verified")
   phoneVerifiedAt DateTime? @map("phone_verified_at")
@@ -53,6 +53,7 @@ model Identity {
   id         String  @id @default(uuid())
   deviceId   String  @unique // browser/device identifier
   ip         String?
+  fingerprint Json?    // ব্রাউজারের হার্ডওয়্যার ডিটেইলস সেভ রাখার জন্য
   userAgent  String?
   trustLevel Int     @default(0) // 0=guest,1=verified,2=trusted
 
@@ -63,6 +64,7 @@ model Identity {
   createdAt DateTime @default(now())
 
   @@index([deviceId])
+  @@map("identities")
 }
 
 model Role {
@@ -136,20 +138,29 @@ model OTP {
 
 model Deal {
   id     Int        @id @default(autoincrement())
+  item String? 
   amount Decimal    @db.Decimal(18, 2)
   status DealStatus @default(CREATED)
 
   paymentRef String @unique @map("payment_ref")
 
-  // 🔐 NEW: secure invite access (seller join করবে)
+  // secure invite access (seller join করবে)
   inviteToken     String?   @unique
   inviteExpiresAt DateTime?
 
-  buyerId  Int @map("buyer_id")
-  sellerId Int @map("seller_id")
+  // allow guest deals where one or both sides are not yet backed by a User row
+  buyerId  Int? @map("buyer_id")
+  sellerId Int? @map("seller_id")
 
-  buyer  User @relation("buyerDeals", fields: [buyerId], references: [id])
-  seller User @relation("sellerDeals", fields: [sellerId], references: [id])
+  // keep guest-level identifying metadata for each side
+  buyerPhone  String? @map("buyer_phone")
+  sellerPhone String? @map("seller_phone")
+
+  buyerDeviceId  String?
+  sellerDeviceId String?
+
+  buyer  User? @relation("buyerDeals", fields: [buyerId], references: [id])
+  seller User? @relation("sellerDeals", fields: [sellerId], references: [id])
 
   messages     Message[]
   escrow       Escrow?
@@ -175,7 +186,7 @@ model Message {
   content  String
   type     MessageType
 
-  // 🔥 NEW: sender type clarity
+  // sender type clarity
   senderType MessageSenderType
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -195,7 +206,7 @@ model Escrow {
 
   amount     Decimal      @db.Decimal(18, 2)
   status     EscrowStatus @default(HELD)
-  // 🔥 NEW: lifecycle tracking
+  // lifecycle tracking
   heldAt     DateTime     @default(now())
   releasedAt DateTime?    @map("released_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
@@ -220,13 +231,13 @@ model Payment {
 
   idempotencyKey String @map("idempotency_key")
 
-  // 🔥 NEW: direction (in/out)
+  // direction (in/out)
   direction PaymentDirection
 
   ipAddress  String? @map("ip_address")
   deviceInfo String? @map("device_info")
 
-  // 🔥 NEW: raw gateway response
+  // raw gateway response
   gatewayResponse Json?
 
   verifiedBy     Int?  @map("verified_by")
@@ -279,7 +290,7 @@ model ServiceChargeConfig {
 
   isActive Boolean @default(true) @map("is_active")
 
-  // 🔥 NEW: versioning
+  // versioning
   version Int @default(1)
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -395,6 +406,7 @@ model RequestLog {
   createdAt DateTime @default(now())
 
   @@index([ip, createdAt])
+  @@map("request_logs")
 }
 
 // ENUMS

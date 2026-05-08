@@ -38,7 +38,7 @@ CREATE TYPE "UserStatus" AS ENUM ('PENDING_VERIFICATION', 'VERIFIED', 'SUSPENDED
 CREATE TABLE "users" (
     "id" SERIAL NOT NULL,
     "name" TEXT,
-    "phone" TEXT NOT NULL,
+    "phone" TEXT,
     "password" TEXT,
     "is_verified" BOOLEAN NOT NULL DEFAULT false,
     "phone_verified_at" TIMESTAMP(3),
@@ -58,16 +58,17 @@ CREATE TABLE "users" (
 );
 
 -- CreateTable
-CREATE TABLE "Identity" (
+CREATE TABLE "identities" (
     "id" TEXT NOT NULL,
     "deviceId" TEXT NOT NULL,
     "ip" TEXT,
+    "fingerprint" JSONB,
     "userAgent" TEXT,
     "trustLevel" INTEGER NOT NULL DEFAULT 0,
     "userId" INTEGER,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "Identity_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "identities_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -123,13 +124,18 @@ CREATE TABLE "otps" (
 -- CreateTable
 CREATE TABLE "deals" (
     "id" SERIAL NOT NULL,
+    "item" TEXT,
     "amount" DECIMAL(18,2) NOT NULL,
     "status" "DealStatus" NOT NULL DEFAULT 'CREATED',
     "payment_ref" TEXT NOT NULL,
     "inviteToken" TEXT,
     "inviteExpiresAt" TIMESTAMP(3),
-    "buyer_id" INTEGER NOT NULL,
-    "seller_id" INTEGER NOT NULL,
+    "buyer_id" INTEGER,
+    "seller_id" INTEGER,
+    "buyer_phone" TEXT,
+    "seller_phone" TEXT,
+    "buyerDeviceId" TEXT,
+    "sellerDeviceId" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -271,18 +277,15 @@ CREATE TABLE "transactions" (
 );
 
 -- CreateTable
-CREATE TABLE "RequestLog" (
+CREATE TABLE "request_logs" (
     "id" SERIAL NOT NULL,
     "ip" TEXT NOT NULL,
     "deviceId" TEXT,
     "path" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT "RequestLog_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "request_logs_pkey" PRIMARY KEY ("id")
 );
-
--- CreateIndex
-CREATE UNIQUE INDEX "users_phone_key" ON "users"("phone");
 
 -- CreateIndex
 CREATE INDEX "users_phone_idx" ON "users"("phone");
@@ -291,10 +294,10 @@ CREATE INDEX "users_phone_idx" ON "users"("phone");
 CREATE INDEX "users_type_status_idx" ON "users"("type", "status");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "Identity_deviceId_key" ON "Identity"("deviceId");
+CREATE UNIQUE INDEX "identities_deviceId_key" ON "identities"("deviceId");
 
 -- CreateIndex
-CREATE INDEX "Identity_deviceId_idx" ON "Identity"("deviceId");
+CREATE INDEX "identities_deviceId_idx" ON "identities"("deviceId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "permissions_name_key" ON "permissions"("name");
@@ -372,10 +375,10 @@ CREATE INDEX "audit_logs_user_id_created_at_idx" ON "audit_logs"("user_id", "cre
 CREATE INDEX "transactions_deal_id_idx" ON "transactions"("deal_id");
 
 -- CreateIndex
-CREATE INDEX "RequestLog_ip_createdAt_idx" ON "RequestLog"("ip", "createdAt");
+CREATE INDEX "request_logs_ip_createdAt_idx" ON "request_logs"("ip", "createdAt");
 
 -- AddForeignKey
-ALTER TABLE "Identity" ADD CONSTRAINT "Identity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "identities" ADD CONSTRAINT "identities_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -390,10 +393,10 @@ ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_role_id_fkey" FO
 ALTER TABLE "role_permissions" ADD CONSTRAINT "role_permissions_permission_id_fkey" FOREIGN KEY ("permission_id") REFERENCES "permissions"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "deals" ADD CONSTRAINT "deals_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "deals" ADD CONSTRAINT "deals_buyer_id_fkey" FOREIGN KEY ("buyer_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "deals" ADD CONSTRAINT "deals_seller_id_fkey" FOREIGN KEY ("seller_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "deals" ADD CONSTRAINT "deals_seller_id_fkey" FOREIGN KEY ("seller_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "messages" ADD CONSTRAINT "messages_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
