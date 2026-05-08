@@ -136,6 +136,8 @@ CREATE TABLE "deals" (
     "seller_phone" TEXT,
     "buyerDeviceId" TEXT,
     "sellerDeviceId" TEXT,
+    "buyer_identity_id" TEXT,
+    "seller_identity_id" TEXT,
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 
@@ -333,6 +335,18 @@ CREATE INDEX "deals_buyer_id_idx" ON "deals"("buyer_id");
 CREATE INDEX "deals_seller_id_idx" ON "deals"("seller_id");
 
 -- CreateIndex
+CREATE INDEX "deals_buyerDeviceId_created_at_idx" ON "deals"("buyerDeviceId", "created_at");
+
+-- CreateIndex
+CREATE INDEX "deals_sellerDeviceId_created_at_idx" ON "deals"("sellerDeviceId", "created_at");
+
+-- CreateIndex
+CREATE INDEX "deals_buyer_phone_idx" ON "deals"("buyer_phone");
+
+-- CreateIndex
+CREATE INDEX "deals_seller_phone_idx" ON "deals"("seller_phone");
+
+-- CreateIndex
 CREATE INDEX "deals_status_created_at_idx" ON "deals"("status", "created_at");
 
 -- CreateIndex
@@ -357,7 +371,7 @@ CREATE UNIQUE INDEX "payments_trx_id_payment_method_id_key" ON "payments"("trx_i
 CREATE UNIQUE INDEX "payment_methods_name_key" ON "payment_methods"("name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "service_charge_configs_payment_method_id_key" ON "service_charge_configs"("payment_method_id");
+CREATE UNIQUE INDEX "service_charge_configs_payment_method_id_version_key" ON "service_charge_configs"("payment_method_id", "version");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "deal_charges_deal_id_key" ON "deal_charges"("deal_id");
@@ -397,6 +411,12 @@ ALTER TABLE "deals" ADD CONSTRAINT "deals_buyer_id_fkey" FOREIGN KEY ("buyer_id"
 
 -- AddForeignKey
 ALTER TABLE "deals" ADD CONSTRAINT "deals_seller_id_fkey" FOREIGN KEY ("seller_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "deals" ADD CONSTRAINT "deals_buyer_identity_id_fkey" FOREIGN KEY ("buyer_identity_id") REFERENCES "identities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "deals" ADD CONSTRAINT "deals_seller_identity_id_fkey" FOREIGN KEY ("seller_identity_id") REFERENCES "identities"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "messages" ADD CONSTRAINT "messages_deal_id_fkey" FOREIGN KEY ("deal_id") REFERENCES "deals"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

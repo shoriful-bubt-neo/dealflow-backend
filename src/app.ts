@@ -6,6 +6,7 @@ import roleRoutes from "./api/v1/role/role.route.js";
 import userRoutes from "./api/v1/user/user.route.js";
 import paymentMethodRoutes from "./api/v1/paymentMethod/paymentMethod.route.js";
 import serviceChargeConfigRoutes from "./api/v1/serviceChargeConfig/serviceChargeConfig.route.js";
+import dealRoutes from "./api/v1/deal/deal.route.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import prisma from "./config/prisma.js";
 
@@ -21,6 +22,7 @@ app.use("/api/v1/roles", roleRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/service-charge-configs", serviceChargeConfigRoutes);
+app.use("/api/v1/deals", dealRoutes);
 
 // middlewares
 app.use(globalErrorHandler);
