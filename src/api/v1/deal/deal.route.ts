@@ -27,6 +27,8 @@ const router = Router();
  *   inviteExpiresAt: string (ISO),
  *   buyerTotal: number,
  *   sellerReceives: number,
+ *   role: "BUYER" | "SELLER",
+ *   identityId: string,
  *   message: string
  * }
  */

@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { validateCreateDealPayload, prepareValidatedInput } from "./deal.validation";
 import { createDeal } from "./deal.service";
+import { generateToken } from "../../../utils/jwt.js";
 
 /**
  * POST /deals
@@ -50,7 +51,22 @@ export async function handleCreateDeal(
     // Step 3: Execute business logic
     const response = await createDeal(validatedInput);
 
-    // Step 4: Return 201 Created with deal response
+    // Step 4: Generate JWT token and set cookie
+    const tokenPayload = {
+      userId: normalizedUserId,
+      identityId: response.identityId,
+      role: response.role,
+      dealId: response.dealId,
+    };
+    const token = generateToken(tokenPayload);
+    res.cookie("authToken", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+
+    // Step 5: Return 201 Created with deal response
     res.status(201).json(response);
   } catch (error: unknown) {
     // Handle validation errors (Zod)

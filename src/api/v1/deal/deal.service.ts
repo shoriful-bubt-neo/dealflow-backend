@@ -31,7 +31,7 @@ function generateInviteToken(): string {
 
 /**
  * Resolve or create an Identity record from device fingerprint
- * 🔥 DEVICE TRACKING: Map device_fingerprint to persistent identity
+ * DEVICE TRACKING: Map device_fingerprint to persistent identity
  */
 async function resolveOrCreateIdentity(
   deviceFingerprint: string,
@@ -91,7 +91,7 @@ async function getAuthenticatedUser(userId?: number) {
 
 /**
  * Load and validate payment method + service charge config
- * 🔥 CONFIG SOURCE OF TRUTH: All charge calculations come from backend config
+ * CONFIG SOURCE OF TRUTH: All charge calculations come from backend config
  */
 async function loadPaymentConfig(paymentMethodId: number) {
   const config = await prisma.serviceChargeConfig.findFirst({
@@ -121,7 +121,7 @@ async function loadPaymentConfig(paymentMethodId: number) {
 
 /**
  * Calculate service charge and deal economics server-side
- * 🔥 PRICE AUTHORITY: Frontend suggestions are validated and recalculated here
+ * PRICE AUTHORITY: Frontend suggestions are validated and recalculated here
  */
 function calculateCharges(
   baseAmount: Prisma.Decimal,
@@ -133,9 +133,9 @@ function calculateCharges(
     chargeType === "FIXED"
       ? chargeValue
       : baseAmount
-          .mul(chargeValue)
-          .div(new Prisma.Decimal(100))
-          .toDecimalPlaces(2);
+        .mul(chargeValue)
+        .div(new Prisma.Decimal(100))
+        .toDecimalPlaces(2);
 
   let buyerPays = new Prisma.Decimal(0);
   let sellerPays = new Prisma.Decimal(0);
@@ -168,7 +168,7 @@ function calculateCharges(
 
 /**
  * Fraud detection: check for suspicious patterns
- * 🔥 FRAUD DETECTION: Multiple risk signals
+ * FRAUD DETECTION: Multiple risk signals
  */
 async function checkFraud(
   deviceId: string,
@@ -250,7 +250,7 @@ async function checkFraud(
 
 /**
  * Create deal with all related records in a transaction
- * 🔥 ATOMIC TRANSACTION: All-or-nothing consistency
+ * ATOMIC TRANSACTION: All-or-nothing consistency
  */
 async function createDealTransaction(
   input: ValidatedDealInput,
@@ -274,33 +274,33 @@ async function createDealTransaction(
       inviteExpiresAt,
       ...(input.type === "BUYER"
         ? {
-            buyerPhone: input.phone,
-            buyerDeviceId: identity.deviceId,
-            buyerIdentity: {
-              connect: { id: identity.id },
-            },
-            ...(authenticatedUserId
-              ? {
-                  buyer: {
-                    connect: { id: authenticatedUserId },
-                  },
-                }
-              : {}),
-          }
+          buyerPhone: input.phone,
+          buyerDeviceId: identity.deviceId,
+          buyerIdentity: {
+            connect: { id: identity.id },
+          },
+          ...(authenticatedUserId
+            ? {
+              buyer: {
+                connect: { id: authenticatedUserId },
+              },
+            }
+            : {}),
+        }
         : {
-            sellerPhone: input.phone,
-            sellerDeviceId: identity.deviceId,
-            sellerIdentity: {
-              connect: { id: identity.id },
-            },
-            ...(authenticatedUserId
-              ? {
-                  seller: {
-                    connect: { id: authenticatedUserId },
-                  },
-                }
-              : {}),
-          }),
+          sellerPhone: input.phone,
+          sellerDeviceId: identity.deviceId,
+          sellerIdentity: {
+            connect: { id: identity.id },
+          },
+          ...(authenticatedUserId
+            ? {
+              seller: {
+                connect: { id: authenticatedUserId },
+              },
+            }
+            : {}),
+        }),
     };
 
     const deal = await tx.deal.create({ data: dealCreatePayload });
@@ -439,6 +439,8 @@ export async function createDeal(
       riskLevel: fraudCheck.riskLevel,
       buyerTotal: chargeCalculation.buyerTotal,
       sellerReceives: chargeCalculation.sellerReceives,
+      role: input.type,
+      identityId: identity.id,
       message: "Deal created successfully",
     };
   } catch (error) {

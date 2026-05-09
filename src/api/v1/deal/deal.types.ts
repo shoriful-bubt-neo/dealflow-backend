@@ -20,6 +20,8 @@ export interface CreateDealResponse {
   riskLevel?: "LOW" | "MEDIUM" | "HIGH";
   buyerTotal?: number;
   sellerReceives?: number;
+  role: "BUYER" | "SELLER";
+  identityId: string;
   message: string;
 }
 
