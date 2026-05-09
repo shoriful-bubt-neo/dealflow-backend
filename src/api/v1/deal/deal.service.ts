@@ -6,6 +6,9 @@ import type {
   CreateDealResponse,
   FraudCheckResult,
   ChargeCalculation,
+  GetDealByCodeResponse,
+  JoinDealPayload,
+  JoinDealResponse,
 } from "./deal.types";
 import { Prisma } from "../../../generated/prisma/client.js";
 
@@ -397,7 +400,7 @@ export async function createDeal(
 
     const paymentConfig = await loadPaymentConfig(input.paymentMethodId);
 
-    const payer = paymentConfig.payer;
+    const payer = input.chargeBearer;
     const chargeValue =
       paymentConfig.type === "FIXED"
         ? paymentConfig.fixedAmount!
@@ -447,4 +450,150 @@ export async function createDeal(
     console.error("Deal creation error:", error);
     throw error;
   }
+}
+
+async function findDealByPaymentRef(paymentRef: string) {
+  return prisma.deal.findFirst({
+    where: { paymentRef },
+    include: {
+      charge: true,
+    },
+  });
+}
+
+function resolveJoinRole(deal: { buyerPhone: string | null; sellerPhone: string | null }) {
+  if (deal.buyerPhone && !deal.sellerPhone) return "SELLER" as const;
+  if (deal.sellerPhone && !deal.buyerPhone) return "BUYER" as const;
+  throw new Error("Deal already has both sides or is not joinable");
+}
+
+export async function getDealByCode(
+  paymentRef: string,
+): Promise<GetDealByCodeResponse | null> {
+  const deal = await findDealByPaymentRef(paymentRef);
+  if (!deal) return null;
+
+  const now = new Date();
+  const isExpired = deal.inviteExpiresAt ? deal.inviteExpiresAt < now : false;
+  const joinRole = resolveJoinRole(deal);
+
+  return {
+    success: true,
+    dealId: deal.id,
+    paymentRef: deal.paymentRef,
+    item: deal.item || "",
+    amount: Number(deal.amount.toString()),
+    joinRole,
+    isJoinable: !isExpired,
+    inviteExpiresAt: deal.inviteExpiresAt?.toISOString() ?? new Date().toISOString(),
+    message: isExpired ? "Deal invite has expired" : "Deal code is valid",
+  };
+}
+
+export async function joinDeal(
+  payload: JoinDealPayload,
+  ipAddress?: string,
+  userAgent?: string,
+  requestPath?: string,
+): Promise<JoinDealResponse> {
+  const deal = await findDealByPaymentRef(payload.payment_ref);
+  if (!deal) {
+    throw new Error("Deal not found");
+  }
+
+  if (deal.inviteExpiresAt && deal.inviteExpiresAt < new Date()) {
+    throw new Error("Deal invite has expired");
+  }
+
+  const joinRole = resolveJoinRole(deal);
+  const identity = await resolveOrCreateIdentity(
+    payload.device_fingerprint,
+    ipAddress,
+    userAgent,
+  );
+
+  if (joinRole === "SELLER") {
+    if (deal.buyerDeviceId === identity.deviceId || deal.buyerIdentityId === identity.id) {
+      throw new Error("Opposite role cannot join from same device or identity");
+    }
+  } else {
+    if (deal.sellerDeviceId === identity.deviceId || deal.sellerIdentityId === identity.id) {
+      throw new Error("Opposite role cannot join from same device or identity");
+    }
+  }
+
+  const authenticatedUser = await getAuthenticatedUser(payload.user_id);
+  const authenticatedUserId = authenticatedUser?.id ?? null;
+
+  const updateData: Prisma.DealUpdateInput = {
+    status: deal.status,
+    ...(joinRole === "SELLER"
+      ? {
+          sellerDeviceId: identity.deviceId,
+          sellerIdentity: {
+            connect: { id: identity.id },
+          },
+          ...(authenticatedUserId
+            ? {
+                seller: {
+                  connect: { id: authenticatedUserId },
+                },
+              }
+            : {}),
+        }
+      : {
+          buyerDeviceId: identity.deviceId,
+          buyerIdentity: {
+            connect: { id: identity.id },
+          },
+          ...(authenticatedUserId
+            ? {
+                buyer: {
+                  connect: { id: authenticatedUserId },
+                },
+              }
+            : {}),
+        }),
+  };
+
+  const updatedDeal = await prisma.deal.update({
+    where: { id: deal.id },
+    data: updateData,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      dealId: updatedDeal.id,
+      action: "DEAL_JOINED",
+      entityType: "deal",
+      entityId: updatedDeal.id,
+      userId: authenticatedUserId ?? undefined,
+      deviceId: identity.deviceId,
+      ipAddress,
+      meta: {
+        role: joinRole,
+        identityId: identity.id,
+        requestPath,
+        paymentRef: updatedDeal.paymentRef,
+      },
+    },
+  });
+
+  await prisma.requestLog.create({
+    data: {
+      ip: ipAddress || "unknown",
+      deviceId: identity.deviceId,
+      path: requestPath || "/deals/join",
+    },
+  });
+
+  return {
+    success: true,
+    dealId: updatedDeal.id,
+    paymentRef: updatedDeal.paymentRef,
+    role: joinRole,
+    identityId: identity.id,
+    inviteExpiresAt: updatedDeal.inviteExpiresAt?.toISOString() ?? new Date().toISOString(),
+    message: "Joined deal successfully",
+  };
 }

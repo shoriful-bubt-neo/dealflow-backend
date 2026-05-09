@@ -1,7 +1,87 @@
 import { Request, Response } from "express";
-import { validateCreateDealPayload, prepareValidatedInput } from "./deal.validation";
-import { createDeal } from "./deal.service";
+import { validateCreateDealPayload, validateJoinDealPayload, prepareValidatedInput } from "./deal.validation";
+import { createDeal, getDealByCode, joinDeal } from "./deal.service";
 import { generateToken } from "../../../utils/jwt.js";
+
+/**
+ * GET /deals/code/:paymentRef
+ * Validate a deal code and return join metadata
+ */
+export async function handleGetDealByCode(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const paymentRef = String(req.params.paymentRef || "").trim();
+  if (!paymentRef) {
+    res.status(400).json({ success: false, message: "Deal code is required" });
+    return;
+  }
+
+  const deal = await getDealByCode(paymentRef);
+  if (!deal) {
+    res.status(404).json({ success: false, message: "Deal not found" });
+    return;
+  }
+
+  res.status(200).json(deal);
+}
+
+/**
+ * POST /deals/join
+ * Join an existing deal using payment reference and device fingerprint
+ */
+export async function handleJoinDeal(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    const payload = validateJoinDealPayload(req.body);
+    const ipAddress = req.ip || req.socket.remoteAddress;
+    const userAgent = req.get("user-agent");
+    const requestPath = req.originalUrl || req.path;
+
+    const result = await joinDeal(payload, ipAddress, userAgent, requestPath);
+    const token = generateToken({
+      userId: payload.user_id,
+      identityId: result.identityId,
+      role: result.role,
+      dealId: result.dealId,
+    });
+
+    res.cookie("authToken", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+    });
+
+    res.status(200).json(result);
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      const zodError = error as any;
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: zodError.errors,
+      });
+    }
+
+    if (error instanceof Error) {
+      if (error.message.includes("not found")) {
+        return res.status(404).json({ success: false, message: error.message });
+      }
+      if (error.message.includes("expired")) {
+        return res.status(410).json({ success: false, message: error.message });
+      }
+      if (error.message.includes("same device") || error.message.includes("already has both sides")) {
+        return res.status(403).json({ success: false, message: error.message });
+      }
+      return res.status(400).json({ success: false, message: error.message });
+    }
+
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+}
 
 /**
  * POST /deals

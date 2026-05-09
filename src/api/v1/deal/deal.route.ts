@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { handleCreateDeal } from "./deal.controller.js";
+import { handleCreateDeal, handleGetDealByCode, handleJoinDeal } from "./deal.controller.js";
 
 const router = Router();
 
@@ -32,6 +32,8 @@ const router = Router();
  *   message: string
  * }
  */
+router.get("/code/:paymentRef", handleGetDealByCode);
+router.post("/join", handleJoinDeal);
 router.post("/", handleCreateDeal);
 
 export default router;
