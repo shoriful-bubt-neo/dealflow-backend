@@ -2,20 +2,29 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
+import cookieParser from "cookie-parser";
 import roleRoutes from "./api/v1/role/role.route.js";
 import userRoutes from "./api/v1/user/user.route.js";
 import paymentMethodRoutes from "./api/v1/paymentMethod/paymentMethod.route.js";
 import serviceChargeConfigRoutes from "./api/v1/serviceChargeConfig/serviceChargeConfig.route.js";
 import dealRoutes from "./api/v1/deal/deal.route.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
+import { authenticateToken } from "./middlewares/auth.js";
 import prisma from "./config/prisma.js";
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: 'http://localhost:3000',
+  credentials: true
+}));
 app.use(helmet());
 app.use(morgan("dev"));
+app.use(cookieParser());
 app.use(express.json());
+
+// Auth middleware for all routes
+app.use(authenticateToken);
 
 // routes
 app.use("/api/v1/roles", roleRoutes);
