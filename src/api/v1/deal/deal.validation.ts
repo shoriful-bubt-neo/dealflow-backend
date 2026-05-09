@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CreateDealPayload, ValidatedDealInput } from "./deal.types";
+import type { CreateDealPayload, ValidatedDealInput, JoinDealPayload } from "./deal.types";
 
 // Zod schema for incoming payload validation
 const createDealPayloadSchema = z.object({
@@ -31,6 +31,18 @@ const createDealPayloadSchema = z.object({
   user_id: z.number().int().positive("User ID must be valid").optional(),
 });
 
+const joinDealPayloadSchema = z.object({
+  payment_ref: z
+    .string()
+    .trim()
+    .min(5, "Deal code is required"),
+  device_fingerprint: z
+    .string()
+    .trim()
+    .min(20, "Device fingerprint is invalid"),
+  user_id: z.number().int().positive("User ID must be valid").optional(),
+});
+
 /**
  * Validate incoming deal creation payload from frontend
  * @returns parsed payload or throws validation error
@@ -39,6 +51,10 @@ export function validateCreateDealPayload(
   data: unknown,
 ): CreateDealPayload {
   return createDealPayloadSchema.parse(data);
+}
+
+export function validateJoinDealPayload(data: unknown): JoinDealPayload {
+  return joinDealPayloadSchema.parse(data);
 }
 
 /**

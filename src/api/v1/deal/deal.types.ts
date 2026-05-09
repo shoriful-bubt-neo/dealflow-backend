@@ -25,6 +25,34 @@ export interface CreateDealResponse {
   message: string;
 }
 
+export interface GetDealByCodeResponse {
+  success: boolean;
+  dealId: number;
+  paymentRef: string;
+  item: string;
+  amount: number;
+  joinRole: "BUYER" | "SELLER";
+  isJoinable: boolean;
+  inviteExpiresAt: string;
+  message: string;
+}
+
+export interface JoinDealPayload {
+  payment_ref: string;
+  device_fingerprint: string;
+  user_id?: number;
+}
+
+export interface JoinDealResponse {
+  success: boolean;
+  dealId: number;
+  paymentRef: string;
+  role: "BUYER" | "SELLER";
+  identityId: string;
+  inviteExpiresAt: string;
+  message: string;
+}
+
 // Internal service request after validation
 export interface ValidatedDealInput {
   type: "BUYER" | "SELLER";
