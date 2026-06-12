@@ -50,12 +50,12 @@ model User {
 }
 
 model Identity {
-  id         String  @id @default(uuid())
-  deviceId   String  @unique // browser/device identifier
-  ip         String?
-  fingerprint Json?    // ব্রাউজারের হার্ডওয়্যার ডিটেইলস সেভ রাখার জন্য
-  userAgent  String?
-  trustLevel Int     @default(0) // 0=guest,1=verified,2=trusted
+  id          String  @id @default(uuid())
+  deviceId    String  @unique // browser/device identifier
+  ip          String?
+  fingerprint Json? // ব্রাউজারের হার্ডওয়্যার ডিটেইলস সেভ রাখার জন্য
+  userAgent   String?
+  trustLevel  Int     @default(0) // 0=guest,1=verified,2=trusted
 
   // optional link to User (OTP verify করলে attach হবে)
   userId Int?
@@ -141,7 +141,7 @@ model OTP {
 
 model Deal {
   id     Int        @id @default(autoincrement())
-  item String? 
+  item   String?
   amount Decimal    @db.Decimal(18, 2)
   status DealStatus @default(CREATED)
 
@@ -159,13 +159,13 @@ model Deal {
   buyerPhone  String? @map("buyer_phone")
   sellerPhone String? @map("seller_phone")
 
-  buyerDeviceId  String?
-  sellerDeviceId String?
+  buyerDeviceId    String?
+  sellerDeviceId   String?
   buyerIdentityId  String? @map("buyer_identity_id")
   sellerIdentityId String? @map("seller_identity_id")
 
-  buyer  User? @relation("buyerDeals", fields: [buyerId], references: [id])
-  seller User? @relation("sellerDeals", fields: [sellerId], references: [id])
+  buyer          User?     @relation("buyerDeals", fields: [buyerId], references: [id])
+  seller         User?     @relation("sellerDeals", fields: [sellerId], references: [id])
   buyerIdentity  Identity? @relation("DealBuyerIdentity", fields: [buyerIdentityId], references: [id])
   sellerIdentity Identity? @relation("DealSellerIdentity", fields: [sellerIdentityId], references: [id])
 
@@ -293,6 +293,9 @@ model ServiceChargeConfig {
   paymentMethodId Int           @map("payment_method_id")
   method          PaymentMethod @relation(fields: [paymentMethodId], references: [id])
 
+  minAmount Decimal  @default(0.00) @map("min_amount") @db.Decimal(18, 2)
+  maxAmount Decimal? @map("max_amount") @db.Decimal(18, 2)
+
   type        ChargeType
   percentage  Decimal?   @db.Decimal(5, 2)
   fixedAmount Decimal?   @db.Decimal(18, 2)
@@ -306,7 +309,7 @@ model ServiceChargeConfig {
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([paymentMethodId, version])
+  @@unique([paymentMethodId, minAmount, version])
   @@map("service_charge_configs")
 }
 
