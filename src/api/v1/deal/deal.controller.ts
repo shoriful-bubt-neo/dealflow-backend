@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
-import { validateCreateDealPayload, validateJoinDealPayload, prepareValidatedInput } from "./deal.validation";
-import { createDeal, getDealByCode, joinDeal } from "./deal.service";
+import { validateCreateDealPayload, validateJoinDealPayload, prepareValidatedInput } from "./deal.validation.js";
+import { createDeal, getDealByCode, joinDeal } from "./deal.service.js";
 import { generateToken } from "../../../utils/jwt.js";
 
 /**

@@ -9,7 +9,7 @@ import type {
   GetDealByCodeResponse,
   JoinDealPayload,
   JoinDealResponse,
-} from "./deal.types";
+} from "./deal.types.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 
 interface IdentityResult {
@@ -96,12 +96,33 @@ async function getAuthenticatedUser(userId?: number) {
  * Load and validate payment method + service charge config
  * CONFIG SOURCE OF TRUTH: All charge calculations come from backend config
  */
-async function loadPaymentConfig(paymentMethodId: number) {
+async function loadPaymentConfig(paymentMethodId: number | string, amount: number | string) {
+  const resolvedPaymentMethodId = Number(paymentMethodId);
+  const resolvedAmount = Number(amount);
+
+  if (
+    !Number.isFinite(resolvedPaymentMethodId) ||
+    !Number.isInteger(resolvedPaymentMethodId) ||
+    resolvedPaymentMethodId <= 0 ||
+    !Number.isFinite(resolvedAmount) ||
+    resolvedAmount <= 0
+  ) {
+    throw new Error("Invalid deal payload: valid payment method and amount are required.");
+  }
+
+  const dealAmount = new Prisma.Decimal(resolvedAmount);
+
   const config = await prisma.serviceChargeConfig.findFirst({
     where: {
-      paymentMethodId,
+      paymentMethodId: resolvedPaymentMethodId,
       isActive: true,
+      minAmount: { lte: dealAmount },
+      OR: [
+        { maxAmount: null },
+        { maxAmount: { gte: dealAmount } },
+      ],
     },
+    orderBy: [{ minAmount: "desc" }, { maxAmount: "asc" }],
     include: {
       method: true,
     },
@@ -398,7 +419,7 @@ export async function createDeal(
     const authenticatedUser = await getAuthenticatedUser(input.authenticatedUserId);
     const authenticatedUserId = authenticatedUser?.id ?? null;
 
-    const paymentConfig = await loadPaymentConfig(input.paymentMethodId);
+    const paymentConfig = await loadPaymentConfig(input.paymentMethodId, input.amount);
 
     const payer = input.chargeBearer;
     const chargeValue =
@@ -529,31 +550,31 @@ export async function joinDeal(
     status: deal.status,
     ...(joinRole === "SELLER"
       ? {
-          sellerDeviceId: identity.deviceId,
-          sellerIdentity: {
-            connect: { id: identity.id },
-          },
-          ...(authenticatedUserId
-            ? {
-                seller: {
-                  connect: { id: authenticatedUserId },
-                },
-              }
-            : {}),
-        }
+        sellerDeviceId: identity.deviceId,
+        sellerIdentity: {
+          connect: { id: identity.id },
+        },
+        ...(authenticatedUserId
+          ? {
+            seller: {
+              connect: { id: authenticatedUserId },
+            },
+          }
+          : {}),
+      }
       : {
-          buyerDeviceId: identity.deviceId,
-          buyerIdentity: {
-            connect: { id: identity.id },
-          },
-          ...(authenticatedUserId
-            ? {
-                buyer: {
-                  connect: { id: authenticatedUserId },
-                },
-              }
-            : {}),
-        }),
+        buyerDeviceId: identity.deviceId,
+        buyerIdentity: {
+          connect: { id: identity.id },
+        },
+        ...(authenticatedUserId
+          ? {
+            buyer: {
+              connect: { id: authenticatedUserId },
+            },
+          }
+          : {}),
+      }),
   };
 
   const updatedDeal = await prisma.deal.update({

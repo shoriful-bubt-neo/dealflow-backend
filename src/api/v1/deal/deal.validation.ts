@@ -1,10 +1,10 @@
 import { z } from "zod";
-import type { CreateDealPayload, ValidatedDealInput, JoinDealPayload } from "./deal.types";
+import type { CreateDealPayload, ValidatedDealInput, JoinDealPayload } from "./deal.types.js";
 
 // Zod schema for incoming payload validation
 const createDealPayloadSchema = z.object({
   type: z.enum(["BUYER", "SELLER"], {
-    errorMap: () => ({ message: "Type must be BUYER or SELLER" }),
+    message: "Type must be BUYER or SELLER",
   }),
   item: z
     .string()
@@ -12,7 +12,7 @@ const createDealPayloadSchema = z.object({
     .min(1, "Item name is required")
     .max(255, "Item name must be less than 255 characters"),
   amount: z
-    .number()
+    .coerce.number()
     .positive("Amount must be greater than 0")
     .finite("Amount must be a valid number")
     .max(99999999, "Amount exceeds maximum limit"),
@@ -20,15 +20,15 @@ const createDealPayloadSchema = z.object({
     .string()
     .trim()
     .regex(/^\d{10,15}$/, "Phone must be valid (10-15 digits)"),
-  payment_method_id: z.number().int().positive("Payment method ID must be valid"),
+  payment_method_id: z.coerce.number().int().positive("Payment method ID must be valid"),
   chargeBearer: z.enum(["BUYER", "SELLER", "SPLIT"], {
-    errorMap: () => ({ message: "Charge bearer must be BUYER, SELLER, or SPLIT" }),
+    message: "Charge bearer must be BUYER, SELLER, or SPLIT",
   }),
   device_fingerprint: z
     .string()
     .trim()
     .min(20, "Device fingerprint is invalid"),
-  user_id: z.number().int().positive("User ID must be valid").optional(),
+  user_id: z.coerce.number().int().positive("User ID must be valid").optional(),
 });
 
 const joinDealPayloadSchema = z.object({
@@ -40,7 +40,7 @@ const joinDealPayloadSchema = z.object({
     .string()
     .trim()
     .min(20, "Device fingerprint is invalid"),
-  user_id: z.number().int().positive("User ID must be valid").optional(),
+  user_id: z.coerce.number().int().positive("User ID must be valid").optional(),
 });
 
 /**
@@ -73,12 +73,12 @@ export function prepareValidatedInput(
   return {
     type: payload.type,
     item: payload.item,
-    amount: payload.amount,
+    amount: Number(payload.amount),
     phone: payload.phone,
-    paymentMethodId: payload.payment_method_id,
+    paymentMethodId: Number(payload.payment_method_id),
     chargeBearer: payload.chargeBearer,
     deviceFingerprint: payload.device_fingerprint,
-    authenticatedUserId: payload.user_id,
+    authenticatedUserId: payload.user_id !== undefined ? Number(payload.user_id) : undefined,
     ipAddress,
     userAgent,
     requestPath,
