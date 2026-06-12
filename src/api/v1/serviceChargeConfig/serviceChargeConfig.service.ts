@@ -4,22 +4,26 @@ import type { CreateServiceChargeConfigPayload, UpdateServiceChargeConfigPayload
 const createServiceChargeConfig = async (
     payload: CreateServiceChargeConfigPayload
 ) => {
-    const data = {
-        ...payload,
-        percentage:
-            payload.type === "PERCENTAGE"
-                ? payload.percentage
-                : null,
-
-        fixedAmount:
-            payload.type === "FIXED"
-                ? payload.fixedAmount
-                : null,
+    const data: any = {
+        paymentMethodId: payload.paymentMethodId,
+        minAmount: Number(payload.minAmount) || 0,
+        maxAmount: payload.maxAmount !== undefined && payload.maxAmount !== null ? Number(payload.maxAmount) : null,
+        type: payload.type,
+        payer: payload.payer,
+        isActive: payload.isActive ?? true,
     };
 
-    return prisma.serviceChargeConfig.create({
-        data,
-    });
+    if (payload.type === "PERCENTAGE") {
+        data.percentage = payload.percentage !== undefined && payload.percentage !== null ? Number(payload.percentage) : null;
+        data.fixedAmount = null;
+    }
+
+    if (payload.type === "FIXED") {
+        data.fixedAmount = payload.fixedAmount !== undefined && payload.fixedAmount !== null ? Number(payload.fixedAmount) : null;
+        data.percentage = null;
+    }
+
+    return prisma.serviceChargeConfig.create({ data });
 };
 
 const getServiceChargeConfigs = async () => {
@@ -58,24 +62,29 @@ const updateServiceChargeConfig = async (
     id: number,
     payload: UpdateServiceChargeConfigPayload
 ) => {
-    const data = {
-        ...payload,
-    };
+    const data: any = {};
+
+    if (payload.paymentMethodId !== undefined) data.paymentMethodId = payload.paymentMethodId;
+    if (payload.minAmount !== undefined) data.minAmount = Number(payload.minAmount);
+    if (payload.maxAmount !== undefined) data.maxAmount = payload.maxAmount !== null ? Number(payload.maxAmount) : null;
+    if (payload.type !== undefined) data.type = payload.type;
+    if (payload.payer !== undefined) data.payer = payload.payer;
+    if (payload.isActive !== undefined) data.isActive = payload.isActive;
 
     if (payload.type === "PERCENTAGE") {
+        data.percentage = payload.percentage !== undefined && payload.percentage !== null ? Number(payload.percentage) : null;
         data.fixedAmount = null;
     }
 
     if (payload.type === "FIXED") {
+        data.fixedAmount = payload.fixedAmount !== undefined && payload.fixedAmount !== null ? Number(payload.fixedAmount) : null;
         data.percentage = null;
     }
 
     return prisma.serviceChargeConfig.update({
         where: { id },
         data,
-        include: {
-            method: true,
-        },
+        include: { method: true },
     });
 };
 

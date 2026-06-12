@@ -1,5 +1,7 @@
 ﻿export type CreateServiceChargeConfigPayload = {
     paymentMethodId: number;
+    minAmount: number;
+    maxAmount?: number | null;
     type: "PERCENTAGE" | "FIXED";
     percentage?: number;
     fixedAmount?: number;

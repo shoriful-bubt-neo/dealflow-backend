@@ -7,6 +7,9 @@ export const createServiceChargeConfigSchema = z.object({
     body: z
         .object({
             paymentMethodId: z.coerce.number().int().positive(),
+            minAmount: z.coerce.number().min(0),
+
+            maxAmount: z.coerce.number().min(0).optional().nullable(),
 
             type: chargeTypeEnum,
 
@@ -19,6 +22,16 @@ export const createServiceChargeConfigSchema = z.object({
             isActive: z.boolean().optional(),
         })
         .superRefine((data, ctx) => {
+            // min/max validation
+            if (data.maxAmount !== undefined && data.maxAmount !== null) {
+                if (data.maxAmount < data.minAmount) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        path: ["maxAmount"],
+                        message: "Max amount must be greater than or equal to min amount",
+                    });
+                }
+            }
             // Percentage validation
             if (data.type === "PERCENTAGE") {
                 if (data.percentage == null) {
@@ -51,6 +64,10 @@ export const updateServiceChargeConfigSchema = z.object({
         .object({
             paymentMethodId: z.coerce.number().int().positive(),
 
+            minAmount: z.coerce.number().min(0).optional(),
+
+            maxAmount: z.coerce.number().min(0).optional().nullable(),
+
             type: chargeTypeEnum,
 
             percentage: z.coerce.number().min(0).max(100).optional(),
@@ -62,6 +79,19 @@ export const updateServiceChargeConfigSchema = z.object({
             isActive: z.boolean().optional(),
         })
         .superRefine((data, ctx) => {
+            if (
+                data.minAmount !== undefined &&
+                data.maxAmount !== undefined &&
+                data.maxAmount !== null
+            ) {
+                if (data.maxAmount < (data.minAmount ?? 0)) {
+                    ctx.addIssue({
+                        code: z.ZodIssueCode.custom,
+                        path: ["maxAmount"],
+                        message: "Max amount must be greater than or equal to min amount",
+                    });
+                }
+            }
             // Percentage validation
             if (data.type === "PERCENTAGE") {
                 if (data.percentage == null) {
