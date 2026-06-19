@@ -8,6 +8,7 @@ import userRoutes from "./api/v1/user/user.route.js";
 import paymentMethodRoutes from "./api/v1/paymentMethod/paymentMethod.route.js";
 import serviceChargeConfigRoutes from "./api/v1/serviceChargeConfig/serviceChargeConfig.route.js";
 import dealRoutes from "./api/v1/deal/deal.route.js";
+import authRoutes from "./api/v1/auth/auth.route.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import { authenticateToken } from "./middlewares/auth.js";
 import prisma from "./config/prisma.js";
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use(authenticateToken);
 
 // routes
+app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/roles", roleRoutes);
 app.use("/api/v1/users", userRoutes);
 app.use("/api/v1/payment-methods", paymentMethodRoutes);
