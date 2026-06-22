@@ -329,6 +329,21 @@ async function createDealTransaction(
 
     const deal = await tx.deal.create({ data: dealCreatePayload });
 
+    const combinedContent = `Welcome to Deal Room ${paymentRef}. I'm your admin and will supervise this transaction.\n\n` +
+      `Deal: ${input.item} - ${input.amount} BDT\n\n` +
+      `Please use the payment numbers on the left panel to send funds. Once confirmed, I'll update the status.`;
+
+    await tx.message.create({
+      data: {
+        dealId: deal.id,
+        type: "SYSTEM",
+        senderType: "ADMIN",
+        content: combinedContent,
+        createdAt: new Date(),
+      },
+    });
+
+
     await tx.dealCharge.create({
       data: {
         dealId: deal.id,
@@ -580,6 +595,20 @@ export async function joinDeal(
   const updatedDeal = await prisma.deal.update({
     where: { id: deal.id },
     data: updateData,
+  });
+
+  const joinMessage = joinRole === "SELLER"
+    ? "Seller has joined the deal."
+    : "Buyer has joined the deal.";
+
+  await prisma.message.create({
+    data: {
+      dealId: updatedDeal.id,
+      type: "SYSTEM",
+      senderType: "ADMIN",
+      content: joinMessage,
+      createdAt: new Date(),
+    },
   });
 
   await prisma.auditLog.create({
