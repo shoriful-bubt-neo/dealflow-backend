@@ -293,6 +293,12 @@ async function createDealTransaction(
     const dealCreatePayload: Prisma.DealCreateInput = {
       item: input.item,
       amount: new Prisma.Decimal(input.amount),
+      // paymentMethodId: input.paymentMethodId,
+      paymentMethod: {
+        connect: {
+          id: input.paymentMethodId
+        }
+      },
       status: "CREATED",
       paymentRef,
       inviteToken,
