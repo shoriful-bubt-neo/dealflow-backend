@@ -145,7 +145,9 @@ model Deal {
   amount Decimal    @db.Decimal(18, 2)
   status DealStatus @default(CREATED)
 
-  paymentRef String @unique @map("payment_ref")
+  paymentMethodId Int?           @map("payment_method_id")
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  paymentRef      String         @unique @map("payment_ref")
 
   // secure invite access (seller join করবে)
   inviteToken     String?   @unique
@@ -281,6 +283,7 @@ model PaymentMethod {
 
   payments Payment[]
   charges  ServiceChargeConfig[]
+  deals    Deal[]
 
   @@map("payment_methods")
 }
