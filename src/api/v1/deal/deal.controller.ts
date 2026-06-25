@@ -10,7 +10,7 @@ import { generateToken } from "../../../utils/jwt.js";
 export async function handleGetDealByCode(
   req: Request,
   res: Response,
-): Promise<void> {
+): Promise<void | Response> {
   const paymentRef = String(req.params.paymentRef || "").trim();
   if (!paymentRef) {
     res.status(400).json({ success: false, message: "Deal code is required" });
@@ -33,7 +33,7 @@ export async function handleGetDealByCode(
 export async function handleJoinDeal(
   req: Request,
   res: Response,
-): Promise<void> {
+): Promise<void | Response> {
   try {
     const payload = validateJoinDealPayload(req.body);
     const ipAddress = req.ip || req.socket.remoteAddress;
@@ -59,24 +59,29 @@ export async function handleJoinDeal(
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "ZodError") {
       const zodError = error as any;
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: "Validation error",
         errors: zodError.errors,
       });
+      return;
     }
 
     if (error instanceof Error) {
       if (error.message.includes("not found")) {
-        return res.status(404).json({ success: false, message: error.message });
+        res.status(404).json({ success: false, message: error.message });
+        return;
       }
       if (error.message.includes("expired")) {
-        return res.status(410).json({ success: false, message: error.message });
+        res.status(410).json({ success: false, message: error.message });
+        return;
       }
       if (error.message.includes("same device") || error.message.includes("already has both sides")) {
-        return res.status(403).json({ success: false, message: error.message });
+        res.status(403).json({ success: false, message: error.message });
+        return;
       }
-      return res.status(400).json({ success: false, message: error.message });
+      res.status(400).json({ success: false, message: error.message });
+      return;
     }
 
     res.status(500).json({ success: false, message: "Internal server error" });
@@ -90,7 +95,7 @@ export async function handleJoinDeal(
 export async function handleCreateDeal(
   req: Request,
   res: Response,
-): Promise<void> {
+): Promise<void | Response> {
   try {
     // Extract client context
     const ipAddress = req.ip || req.socket.remoteAddress;
@@ -152,36 +157,40 @@ export async function handleCreateDeal(
     // Handle validation errors (Zod)
     if (error instanceof Error && error.name === "ZodError") {
       const zodError = error as any;
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: "Validation error",
         errors: zodError.errors,
       });
+      return;
     }
 
     // Handle business logic errors
     if (error instanceof Error) {
       // Fraud detection rejection
       if (error.message.includes("Fraud detected")) {
-        return res.status(403).json({
+        res.status(403).json({
           success: false,
           message: error.message,
         });
+        return;
       }
 
       // Payment method not found
       if (error.message.includes("Payment method")) {
-        return res.status(404).json({
+        res.status(404).json({
           success: false,
           message: error.message,
         });
+        return;
       }
 
       // Generic bad request
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: error.message,
       });
+      return;
     }
 
     // Unexpected error
