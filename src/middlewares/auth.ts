@@ -9,7 +9,7 @@ declare global {
     }
 }
 
-export function authenticateToken(req: Request, res: Response, next: NextFunction): void {
+export function authenticateToken(req: Request, res: Response, next: NextFunction): Response | void {
     const token = req.cookies?.authToken;
 
     if (!token) {

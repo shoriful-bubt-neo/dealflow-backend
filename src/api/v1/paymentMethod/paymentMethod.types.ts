@@ -1,8 +1,10 @@
-﻿export type CreatePaymentMethodPayload = {
+﻿import type { Prisma } from "../../../generated/prisma/client.js";
+
+export type CreatePaymentMethodPayload = {
     name: string;
     type: string;
     isActive?: boolean;
-    config?: unknown;
+    config?: Prisma.InputJsonValue;
 };
 
 export type UpdatePaymentMethodPayload = Partial<CreatePaymentMethodPayload>;
