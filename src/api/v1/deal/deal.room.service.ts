@@ -1,5 +1,7 @@
+import { v4 as uuidv4 } from "uuid";
 import prisma from "../../../config/prisma.js";
-import type { Prisma } from "../../../generated/prisma/client.js";
+import { Prisma } from "../../../generated/prisma/client.js";
+import type { MessageType, MessageSenderType, DealStatus } from "../../../generated/prisma/enums.js";
 
 export interface DealRoomData {
     id: number;
@@ -25,9 +27,11 @@ export interface DealRoomData {
 
 export interface MessageData {
     id: number;
+    dealId?: number;
     content: string;
-    type: string;
-    senderType: string;
+    type: MessageType;
+    senderType: MessageSenderType;
+    senderRole?: "buyer" | "seller" | "admin";
     createdAt: string;
 }
 
@@ -133,7 +137,7 @@ export async function sendMessage(
     userId: number | null,
     identityId: string,
     content: string,
-    type: string = "TEXT",
+    type: MessageType = "USER",
 ): Promise<MessageData> {
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -156,7 +160,8 @@ export async function sendMessage(
         throw new Error("Unauthorized: Not a participant in this deal");
     }
 
-    const senderType = isBuyer ? "BUYER" : isSeller ? "SELLER" : "GUEST";
+    const senderType: MessageSenderType = isBuyer || isSeller ? "USER" : "SYSTEM";
+    const senderRole = isBuyer ? "buyer" : isSeller ? "seller" : "admin";
 
     const message = await prisma.message.create({
         data: {
@@ -168,6 +173,7 @@ export async function sendMessage(
         },
         select: {
             id: true,
+            dealId: true,
             content: true,
             type: true,
             senderType: true,
@@ -177,9 +183,11 @@ export async function sendMessage(
 
     return {
         id: message.id,
+        dealId: message.dealId,
         content: message.content,
         type: message.type,
         senderType: message.senderType,
+        senderRole,
         createdAt: message.createdAt.toISOString(),
     };
 }
@@ -188,7 +196,7 @@ export async function updateDealStatus(
     dealId: number,
     userId: number | null,
     identityId: string,
-    newStatus: string,
+    newStatus: DealStatus | string,
 ): Promise<{ status: string }> {
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -212,23 +220,26 @@ export async function updateDealStatus(
         throw new Error("Unauthorized: Not a participant in this deal");
     }
 
+    const normalizedStatus = typeof newStatus === "string" && newStatus === "PAYMENT_PENDING"
+        ? "AWAITING_PAYMENT"
+        : newStatus;
     const validStatuses = [
         "CREATED",
-        "PAYMENT_PENDING",
+        "AWAITING_PAYMENT",
         "PAYMENT_RECEIVED",
         "ITEM_DELIVERED",
         "PAYMENT_RELEASED",
         "CANCELLED",
         "ON_HOLD",
     ];
-    if (!validStatuses.includes(newStatus)) {
+    if (!validStatuses.includes(normalizedStatus)) {
         throw new Error("Invalid status");
     }
 
     const updatedDeal = await prisma.deal.update({
         where: { id: dealId },
         data: {
-            status: newStatus,
+            status: normalizedStatus as DealStatus,
         },
         select: { status: true },
     });
@@ -256,7 +267,7 @@ export async function submitPayment(
     userId: number | null,
     identityId: string,
     trxId: string,
-    paymentMethod: string,
+    paymentMethodId: number,
     amount: number,
 ): Promise<{ success: boolean }> {
     const deal = await prisma.deal.findUnique({
@@ -277,17 +288,18 @@ export async function submitPayment(
         throw new Error("Unauthorized: Only buyer can submit payment");
     }
 
-    if (deal.status !== "CREATED" && deal.status !== "PAYMENT_PENDING") {
+    const normalizedStatus: string = deal.status;
+    if (normalizedStatus !== "CREATED" && normalizedStatus !== "AWAITING_PAYMENT") {
         throw new Error("Invalid deal status for payment submission");
     }
 
     const payment = await prisma.payment.create({
         data: {
             dealId,
-            userId: userId ?? undefined,
             trxId,
-            paymentMethod,
-            amount: new Prisma.Decimal(amount),
+            paymentMethodId,
+            direction: "IN",
+            idempotencyKey: uuidv4(),
             status: "VERIFIED",
         },
     });
@@ -302,7 +314,7 @@ export async function submitPayment(
             deviceId: identityId,
             meta: {
                 trxId,
-                paymentMethod,
+                paymentMethodId,
                 amount,
                 paymentId: payment.id,
             },
