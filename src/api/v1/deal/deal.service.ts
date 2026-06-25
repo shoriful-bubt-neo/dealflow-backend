@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import crypto from "crypto";
 import prisma from "../../../config/prisma.js";
+import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 import type {
   ValidatedDealInput,
   CreateDealResponse,
@@ -601,7 +602,7 @@ export async function joinDeal(
     ? "Seller has joined the deal."
     : "Buyer has joined the deal.";
 
-  await prisma.message.create({
+  const joinMessageEntry = await prisma.message.create({
     data: {
       dealId: updatedDeal.id,
       type: "SYSTEM",
@@ -609,6 +610,15 @@ export async function joinDeal(
       content: joinMessage,
       createdAt: new Date(),
     },
+  });
+
+  emitToDealRoom(updatedDeal.id, "message:new", {
+    id: joinMessageEntry.id,
+    dealId: updatedDeal.id,
+    senderType: joinMessageEntry.senderType,
+    content: joinMessageEntry.content,
+    type: joinMessageEntry.type,
+    createdAt: joinMessageEntry.createdAt.toISOString(),
   });
 
   await prisma.auditLog.create({
