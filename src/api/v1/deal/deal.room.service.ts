@@ -46,6 +46,13 @@ export async function getDealRoom(
             charge: true,
             buyer: { select: { id: true } },
             seller: { select: { id: true } },
+            paymentMethod: {
+                select: {
+                    id: true,
+                    name: true,
+                    config: true,
+                }
+            }
         },
     });
 
@@ -82,6 +89,11 @@ export async function getDealRoom(
                 sellerReceives: Number(deal.charge.sellerReceives.toString()),
             }
             : null,
+        paymentMethod: deal.paymentMethod ? {
+            id: deal.paymentMethod.id,
+            name: deal.paymentMethod.name,
+            config: deal.paymentMethod.config as any,
+        } : null,
     };
 }
 
