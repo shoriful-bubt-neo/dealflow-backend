@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import * as dealRoomService from "./deal.room.service.js";
+import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 import { z } from "zod";
 
 const sendMessageSchema = z.object({
@@ -13,14 +14,14 @@ const updateStatusSchema = z.object({
 
 const submitPaymentSchema = z.object({
     trxId: z.string().trim().min(1, "Transaction ID required"),
-    paymentMethod: z.string().trim().min(1, "Payment method required"),
+    paymentMethod: z.coerce.number().positive("Payment method ID is required"),
     amount: z.number().positive("Amount must be positive"),
 });
 
 export async function handleGetDealRoom(
     req: Request,
     res: Response,
-): Promise<void> {
+): Promise<void | Response> {
     try {
         const dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
@@ -55,7 +56,7 @@ export async function handleGetDealRoom(
 export async function handleGetDealMessages(
     req: Request,
     res: Response,
-): Promise<void> {
+): Promise<void | Response> {
     try {
         const dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
@@ -90,7 +91,7 @@ export async function handleGetDealMessages(
 export async function handleSendMessage(
     req: Request,
     res: Response,
-): Promise<void> {
+): Promise<void | Response> {
     try {
         const dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
@@ -114,6 +115,21 @@ export async function handleSendMessage(
             payload.content,
             payload.type,
         );
+
+        emitToDealRoom(dealId, "message:new", {
+            id: message.id,
+            dealId,
+            senderType: message.senderType,
+            senderRole:
+                req.user?.role === "BUYER"
+                    ? "buyer"
+                    : req.user?.role === "SELLER"
+                        ? "seller"
+                        : "admin",
+            content: message.content,
+            type: message.type,
+            createdAt: message.createdAt,
+        });
 
         res.status(201).json({ success: true, data: message });
     } catch (error: unknown) {
@@ -142,7 +158,7 @@ export async function handleSendMessage(
 export async function handleUpdateDealStatus(
     req: Request,
     res: Response,
-): Promise<void> {
+): Promise<void | Response> {
     try {
         const dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
@@ -193,7 +209,7 @@ export async function handleUpdateDealStatus(
 export async function handleSubmitPayment(
     req: Request,
     res: Response,
-): Promise<void> {
+): Promise<void | Response> {
     try {
         const dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
