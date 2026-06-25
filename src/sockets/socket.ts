@@ -1,9 +1,9 @@
 import { Server as HTTPServer } from "http";
 import { Server, Socket } from "socket.io";
 import { verifyToken, JWTPayload } from "../utils/jwt.js";
-import prisma from "../config/prisma.js";
-import { sendMessage, submitPayment } from "../api/v1/deal/deal.room.service.js";
-import cookieParser from "cookie-parser";
+import { sendMessage, submitPayment, updateDealStatus } from "../api/v1/deal/deal.room.service.js";
+import { setSocketServer } from "./roomEmitter.js";
+import { parse as parseCookie } from "cookie";
 
 export interface AuthenticatedSocket extends Socket {
     user?: JWTPayload;
@@ -17,29 +17,21 @@ export function initializeSocket(httpServer: HTTPServer): Server {
             methods: ["GET", "POST"],
         },
     });
+    setSocketServer(io);
 
     io.use((socket: AuthenticatedSocket, next) => {
         const cookieHeader = socket.handshake.headers.cookie;
+        const authTokenFromCookie = cookieHeader ? parseCookie(cookieHeader as string).authToken : undefined;
+        const authTokenFromAuth = socket.handshake.auth?.token as string | undefined;
+        const authTokenFromQuery = socket.handshake.query?.token as string | undefined;
 
-        if (!cookieHeader) {
-            return next(new Error("Unauthorized: No cookies found"));
+        const token = authTokenFromCookie || authTokenFromAuth || authTokenFromQuery;
+
+        if (!token) {
+            return next(new Error("Unauthorized: Token missing"));
         }
 
         try {
-            const cookies = cookieParser.JSONCookies(
-                (cookieHeader as string).split(';').reduce((res, c) => {
-                    const [key, val] = c.trim().split('=');
-                    if (key && val) res[key] = decodeURIComponent(val);
-                    return res;
-                }, {} as Record<string, string>)
-            );
-
-            const token = cookies['authToken'];
-
-            if (!token) {
-                return next(new Error("Unauthorized: Token missing"));
-            }
-
             const payload = verifyToken(token);
             if (!payload) {
                 return next(new Error("Invalid token"));
@@ -55,8 +47,8 @@ export function initializeSocket(httpServer: HTTPServer): Server {
     io.on("connection", (socket: AuthenticatedSocket) => {
         if (!socket.user) return;
 
-        const { dealId, identityId, userId } = socket.user;
-        socket.join(`deal-${dealId}`);
+        const user = socket.user;
+        socket.join(`deal-${user.dealId}`);
 
         socket.on("message", async (data: { content: string; type?: string }, callback?: any) => {
             try {
@@ -79,16 +71,22 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                     socket.user.userId || null,
                     socket.user.identityId,
                     data.content,
-                    data.type || "TEXT"
+                    "USER"
                 );
 
-                io.to(`deal-${socket.user.dealId}`).emit("message:new", {
+                io.to(`deal-${user.dealId}`).emit("message:new", {
                     id: newMessage.id,
                     dealId: newMessage.dealId,
                     senderType: newMessage.senderType,
+                    senderRole:
+                        user.role === "BUYER"
+                            ? "buyer"
+                            : user.role === "SELLER"
+                                ? "seller"
+                                : "admin",
                     content: newMessage.content,
                     type: newMessage.type,
-                    createdAt: newMessage.createdAt.toISOString(),
+                    createdAt: newMessage.createdAt,
                 });
 
                 callback?.({ success: true, message: newMessage });
@@ -107,14 +105,14 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                 //     data: { status: data.status },
                 // });
                 const updatedDeal = await updateDealStatus(
-                    socket.user.dealId,
-                    socket.user.userId || null,
-                    socket.user.identityId,
+                    user.dealId,
+                    user.userId || null,
+                    user.identityId,
                     data.status
                 );
 
-                io.to(`deal-${socket.user.dealId}`).emit("status:changed", {
-                    dealId: updatedDeal.id,
+                io.to(`deal-${user.dealId}`).emit("status:changed", {
+                    dealId: user.dealId,
                     status: updatedDeal.status,
                     timestamp: new Date().toISOString(),
                 });
@@ -129,15 +127,15 @@ export function initializeSocket(httpServer: HTTPServer): Server {
         socket.on("payment:submit", async (data: { trxId: string; paymentMethod: string; amount: number }, callback) => {
             try {
                 const result = await submitPayment(
-                    socket.user.dealId,
-                    socket.user.userId || null,
-                    socket.user.identityId,
+                    user.dealId,
+                    user.userId || null,
+                    user.identityId,
                     data.trxId,
-                    data.paymentMethod,
+                    Number(data.paymentMethod),
                     data.amount
                 );
-                io.to(`deal-${socket.user.dealId}`).emit("payment:confirmed", {
-                    dealId: socket.user.dealId,
+                io.to(`deal-${user.dealId}`).emit("payment:confirmed", {
+                    dealId: user.dealId,
                     success: true,
                 });
                 callback?.({ success: true });
@@ -147,7 +145,7 @@ export function initializeSocket(httpServer: HTTPServer): Server {
         });
 
         socket.on("disconnect", () => {
-            socket.leave(`deal-${dealId}`);
+            socket.leave(`deal-${user.dealId}`);
         });
     });
 
