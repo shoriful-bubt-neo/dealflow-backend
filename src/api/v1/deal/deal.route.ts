@@ -1,6 +1,14 @@
 import { Router } from "express";
 import { handleCreateDeal, handleGetDealByCode, handleJoinDeal } from "./deal.controller.js";
-import { handleGetDealMessages, handleGetDealRoom, handleSendMessage, handleSubmitPayment, handleUpdateDealStatus } from "./deal.room.controller.js";
+import {
+    handleGetDealMessages,
+    handleGetDealRoom,
+    handleSendMessage,
+    handleSubmitPayment,
+    handleUpdateDealStatus,
+    handleInitiateSslCommerzPayment,
+    handleSslCommerzCallback,
+} from "./deal.room.controller.js";
 
 const router = Router();
 
@@ -43,5 +51,7 @@ router.get("/:dealId/messages", handleGetDealMessages);
 router.post("/:dealId/messages", handleSendMessage);
 router.patch("/:dealId/status", handleUpdateDealStatus);
 router.post("/:dealId/payment", handleSubmitPayment);
+router.post("/:dealId/payment/initiate", handleInitiateSslCommerzPayment);
+router.post("/:dealId/payment/sslcommerz/callback", handleSslCommerzCallback);
 
 export default router;

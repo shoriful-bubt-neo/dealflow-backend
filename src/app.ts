@@ -23,6 +23,7 @@ app.use(helmet());
 app.use(morgan("dev"));
 app.use(cookieParser());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Auth middleware for all routes
 app.use(authenticateToken);

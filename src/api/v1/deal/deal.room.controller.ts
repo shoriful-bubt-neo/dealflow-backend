@@ -315,3 +315,40 @@ export async function handleInitiateSslCommerzPayment(
         res.status(500).json({ success: false, message: "Internal server error" });
     }
 }
+
+export async function handleSslCommerzCallback(
+    req: Request,
+    res: Response,
+): Promise<void | Response> {
+    let dealId: number | null = null; 
+    try {
+        dealId = Number(req.params.dealId);
+        if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
+            res.status(400).send("Invalid deal ID");
+            return;
+        }
+        const params = { ...req.body, ...req.query };
+        const result = await dealRoomService.confirmSslCommerzPayment(
+            dealId,
+            params,
+            req.ip || undefined,
+            req.get("user-agent") || undefined,
+        );
+
+        const frontendBase =
+            process.env.SSL_COMMERZ_APP_URL?.replace(/\/$/, "") ||
+            process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
+            "http://localhost:3000";
+        const redirectUrl = `${frontendBase}/deal-room?dealId=${dealId}`;
+
+        return res.redirect(redirectUrl);
+    } catch (error: unknown) {
+        const frontendBase =
+            process.env.SSL_COMMERZ_APP_URL?.replace(/\/$/, "") ||
+            process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
+            "http://localhost:3000";
+        const message = error instanceof Error ? error.message : "Payment verification failed";
+        const redirectUrl = `${frontendBase}/deal-room?dealId=${dealId}`;
+        return res.redirect(redirectUrl);
+    }
+}
