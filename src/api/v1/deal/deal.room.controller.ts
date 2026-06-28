@@ -8,6 +8,10 @@ const sendMessageSchema = z.object({
     type: z.enum(["TEXT", "ATTACHMENT"]).optional().default("TEXT"),
 });
 
+const initiatePaymentSchema = z.object({
+    amount: z.number().positive("Amount must be positive"),
+});
+
 const updateStatusSchema = z.object({
     status: z.enum(["CREATED", "PAYMENT_PENDING", "PAYMENT_RECEIVED", "ITEM_DELIVERED", "PAYMENT_RELEASED", "CANCELLED", "ON_HOLD"]),
 });
@@ -233,6 +237,59 @@ export async function handleSubmitPayment(
             payload.trxId,
             payload.paymentMethod,
             payload.amount,
+        );
+
+        res.status(200).json({ success: true, data: result });
+    } catch (error: unknown) {
+        if (error instanceof Error && error.name === "ZodError") {
+            const zodError = error as any;
+            return res.status(400).json({
+                success: false,
+                message: "Validation error",
+                errors: zodError.errors,
+            });
+        }
+
+        if (error instanceof Error) {
+            if (error.message.includes("Unauthorized")) {
+                return res.status(403).json({ success: false, message: error.message });
+            }
+            if (error.message.includes("not found")) {
+                return res.status(404).json({ success: false, message: error.message });
+            }
+            return res.status(400).json({ success: false, message: error.message });
+        }
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+}
+
+export async function handleInitiateSslCommerzPayment(
+    req: Request,
+    res: Response,
+): Promise<void | Response> {
+    try {
+        const dealId = Number(req.params.dealId);
+        if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
+            res.status(400).json({ success: false, message: "Invalid deal ID" });
+            return;
+        }
+
+        const payload = initiatePaymentSchema.parse(req.body);
+        const userId = req.user?.userId;
+        const identityId = req.user?.identityId;
+
+        if (!identityId) {
+            res.status(401).json({ success: false, message: "Unauthorized" });
+            return;
+        }
+
+        const result = await dealRoomService.initiateSslCommerzPayment(
+            dealId,
+            userId || null,
+            identityId,
+            payload.amount,
+            req.ip || undefined,
+            req.get("user-agent") || undefined,
         );
 
         res.status(200).json({ success: true, data: result });
