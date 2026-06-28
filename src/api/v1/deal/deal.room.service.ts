@@ -408,6 +408,121 @@ export async function initiateSslCommerzPayment(
     };
 }
 
+export async function confirmSslCommerzPayment(
+    dealId: number,
+    params: Record<string, any>,
+    ipAddress?: string,
+    userAgent?: string,
+): Promise<{ success: boolean; message: string; transactionId?: string }> {
+    console.log("params: ", params);
+    if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
+        throw new Error("SSLCommerz store credentials are not configured");
+    }
+
+    const valId = String(params.val_id || params.valId || params.value_a || "").trim();
+    if (!valId) {
+        throw new Error("Missing validation ID from SSLCommerz callback");
+    }
+
+    const validationResponse = await axios.get(getSslCommerzGatewayUrl("/validator/api/validationserverAPI.php"), {
+        params: {
+            val_id: valId,
+            store_id: SSL_COMMERZ_STORE_ID,
+            store_passwd: SSL_COMMERZ_STORE_PASSWORD,
+            v: 1,
+            format: "json",
+        },
+    });
+
+    const validated = validationResponse.data;
+    if (!validated || !validated.status) {
+        throw new Error("Invalid SSLCommerz validation response");
+    }
+
+    if (validated.status !== "VALID" && validated.status !== "VALIDATED") {
+        throw new Error(`SSLCommerz transaction validation failed: ${validated.status}`);
+    }
+
+    const transactionId = String(validated.tran_id || "");
+    const paidAmount = Number(validated.amount || 0);
+    const sslPayment = await prisma.payment.findFirst({
+        where: { dealId, trxId: transactionId },
+    });
+
+    if (!sslPayment) {
+        await prisma.payment.create({
+            data: {
+                dealId,
+                trxId: transactionId,
+                paymentMethodId: deal.paymentMethodId ?? 1,
+                direction: "IN",
+                idempotencyKey: uuidv4(),
+                status: "VERIFIED",
+                ipAddress: ipAddress || undefined,
+                deviceInfo: userAgent || undefined,
+                gatewayResponse: validated,
+            },
+        });
+    } else {
+        await prisma.payment.update({
+            where: { id: sslPayment.id },
+            data: {
+                status: "VERIFIED",
+                gatewayResponse: validated,
+            },
+        });
+    }
+
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: { status: true },
+    });
+
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    if (deal.status === "CREATED" || deal.status === "AWAITING_PAYMENT") {
+        await prisma.deal.update({
+            where: { id: dealId },
+            data: { status: "PAID" },
+        });
+    }
+
+    await prisma.auditLog.create({
+        data: {
+            dealId,
+            action: "SSL_COMMERZ_PAYMENT_CONFIRMED",
+            entityType: "deal",
+            entityId: dealId,
+            deviceId: userAgent || undefined,
+            ipAddress: ipAddress || undefined,
+            meta: {
+                transactionId,
+                paidAmount,
+                currentStatus: deal.status,
+                validationStatus: validated.status,
+            },
+        },
+    });
+
+    await prisma.message.create({
+        data: {
+            dealId,
+            type: "SYSTEM",
+            senderType: "ADMIN",
+            content: `SSLCommerz payment successful for transaction ${transactionId}. Amount paid: ৳${paidAmount}.`,
+            createdAt: new Date(),
+        },
+    });
+
+    return {
+        success: true,
+        message: "Payment verified successfully",
+        transactionId,
+    };
+}
+
 export async function submitPayment(
     dealId: number,
     userId: number | null,
