@@ -1,7 +1,18 @@
 import { v4 as uuidv4 } from "uuid";
+import axios from "axios";
 import prisma from "../../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import type { MessageType, MessageSenderType, DealStatus } from "../../../generated/prisma/enums.js";
+
+const SSL_COMMERZ_BASE_URL =
+    process.env.SSL_COMMERZ_BASE_URL?.replace(/\/$/, "") ||
+    "https://sandbox.sslcommerz.com";
+const SSL_COMMERZ_STORE_ID = process.env.SSL_COMMERZ_STORE_ID;
+const SSL_COMMERZ_STORE_PASSWORD = process.env.SSL_COMMERZ_STORE_PASSWORD;
+const APP_URL =
+    process.env.APP_URL?.replace(/\/$/, "") ||
+    process.env.APP_URL?.replace(/\/$/, "") ||
+    "http://localhost:3000";
 
 export interface DealRoomData {
     id: number;
@@ -22,6 +33,12 @@ export interface DealRoomData {
         sellerPays: number;
         buyerTotal: number;
         sellerReceives: number;
+    } | null;
+    paymentMethod: {
+        id: number;
+        name: string;
+        type: string;
+        config: any;
     } | null;
 }
 
@@ -50,6 +67,7 @@ export async function getDealRoom(
                 select: {
                     id: true,
                     name: true,
+                    type: true,
                     config: true,
                 }
             }
@@ -92,6 +110,7 @@ export async function getDealRoom(
         paymentMethod: deal.paymentMethod ? {
             id: deal.paymentMethod.id,
             name: deal.paymentMethod.name,
+            type: deal.paymentMethod.type,
             config: deal.paymentMethod.config as any,
         } : null,
     };
@@ -238,7 +257,7 @@ export async function updateDealStatus(
     const validStatuses = [
         "CREATED",
         "AWAITING_PAYMENT",
-        "PAYMENT_RECEIVED",
+        "PAID",
         "ITEM_DELIVERED",
         "PAYMENT_RELEASED",
         "CANCELLED",
@@ -272,6 +291,121 @@ export async function updateDealStatus(
     });
 
     return { status: updatedDeal.status };
+}
+
+function getSslCommerzGatewayUrl(path: string) {
+    return `${SSL_COMMERZ_BASE_URL}${path}`;
+}
+
+export async function initiateSslCommerzPayment(
+    dealId: number,
+    userId: number | null,
+    identityId: string,
+    amount: number,
+    ipAddress?: string,
+    userAgent?: string,
+): Promise<{ gatewayUrl: string; transactionId: string }> {
+    if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
+        throw new Error("SSLCommerz store credentials are not configured");
+    }
+
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        include: {
+            charge: true,
+            paymentMethod: {
+                select: {
+                    id: true,
+                    name: true,
+                    type: true,
+                    config: true,
+                },
+            },
+        },
+    });
+
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    if (!deal.charge) {
+        throw new Error("Deal charge information is missing");
+    }
+
+    if (deal.status !== "CREATED" && deal.status !== "AWAITING_PAYMENT") {
+        throw new Error("SSLCommerz payment can only be initiated for pending deals");
+    }
+
+    const buyerTotal = Number(deal.charge.buyerTotal.toString());
+    if (Number(amount.toFixed(2)) !== Number(buyerTotal.toFixed(2))) {
+        throw new Error("Payment amount must match the deal buyer total");
+    }
+
+    const transactionId = `ssl-${dealId}-${Date.now()}-${uuidv4().slice(0, 8)}`;
+    const successUrl = `${APP_URL}/api/v1/deals/${dealId}/payment/sslcommerz/callback?dealId=${dealId}`;
+    const failUrl = `${APP_URL}/api/v1/deals/${dealId}/payment/sslcommerz/callback?dealId=${dealId}`;
+    const cancelUrl = `${APP_URL}/api/v1/deals/${dealId}/payment/sslcommerz/callback?dealId=${dealId}`;
+    const ipnUrl = `${APP_URL}/api/v1/deals/${dealId}/payment/sslcommerz/callback?dealId=${dealId}`;
+
+    const formPayload = {
+        store_id: SSL_COMMERZ_STORE_ID,
+        store_passwd: SSL_COMMERZ_STORE_PASSWORD,
+        total_amount: buyerTotal,
+        currency: "BDT",
+        tran_id: transactionId,
+        success_url: successUrl,
+        fail_url: failUrl,
+        cancel_url: cancelUrl,
+        ipn_url: ipnUrl,
+        shipping_method: "NO",
+        product_name: deal.item || "Deal Payment",
+        product_category: deal.paymentMethod?.name || "Deal",
+        product_profile: "general",
+        cus_name: deal.paymentMethod?.name || "Customer",
+        cus_email: "customer@example.com",
+        cus_add1: deal.buyerPhone || "",
+        cus_city: "Dhaka",
+        cus_postcode: "1000",
+        cus_country: "Bangladesh",
+        cus_phone: deal.buyerPhone || "",
+        value_a: deal.paymentRef,
+        value_b: userId ?? "",
+        value_c: identityId,
+        value_d: userAgent || "",
+    };
+
+    const response = await axios.post(
+        getSslCommerzGatewayUrl("/gwprocess/v4/api.php"),
+        new URLSearchParams(formPayload as Record<string, string | number>),
+    );
+
+    if (!response?.data?.GatewayPageURL) {
+        throw new Error("SSLCommerz gateway did not return a payment URL");
+    }
+
+    const paymentMethodId = deal.paymentMethodId ?? deal.paymentMethod?.id;
+    if (!paymentMethodId) {
+        throw new Error("Deal payment method is not configured for SSLCommerz");
+    }
+
+    await prisma.payment.create({
+        data: {
+            dealId,
+            trxId: transactionId,
+            paymentMethodId,
+            direction: "IN",
+            idempotencyKey: uuidv4(),
+            status: "PENDING",
+            ipAddress: ipAddress || undefined,
+            deviceInfo: userAgent || undefined,
+            gatewayResponse: response.data,
+        },
+    });
+
+    return {
+        gatewayUrl: response.data.GatewayPageURL,
+        transactionId,
+    };
 }
 
 export async function submitPayment(
