@@ -8,6 +8,8 @@ import {
     handleUpdateDealStatus,
     handleInitiateSslCommerzPayment,
     handleSslCommerzCallback,
+    handleMarkDelivered,
+    handleCancelOrder,
 } from "./deal.room.controller.js";
 
 const router = Router();
@@ -53,5 +55,7 @@ router.patch("/:dealId/status", handleUpdateDealStatus);
 router.post("/:dealId/payment", handleSubmitPayment);
 router.post("/:dealId/payment/initiate", handleInitiateSslCommerzPayment);
 router.post("/:dealId/payment/sslcommerz/callback", handleSslCommerzCallback);
+router.post("/:dealId/deliver", handleMarkDelivered);
+router.post("/:dealId/cancel", handleCancelOrder);
 
 export default router;
