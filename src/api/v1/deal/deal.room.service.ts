@@ -683,3 +683,98 @@ export async function submitPayment(
 
     return { success: true };
 }
+
+export async function markItemDelivered(
+    dealId: number,
+    userId: number | null,
+    identityId: string,
+    ipAddress?: string,
+    userAgent?: string,
+): Promise<{ success: boolean; message: string }> {
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: {
+            sellerId: true,
+            sellerIdentityId: true,
+            status: true,
+            charge: { select: { buyerTotal: true } }
+        }
+    });
+
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    if (!isSeller) {
+        throw new Error("Unauthorized: Only seller can mark as delivered");
+    }
+
+    // Validate deal status
+    if (deal.status !== "PAID" && deal.status !== "PAYMENT_RECEIVED") {
+        throw new Error(`Invalid deal status: ${deal.status}. Deal must be PAID to mark as delivered.`);
+    }
+
+    // Update deal status to DELIVERED
+    const updatedDeal = await prisma.deal.update({
+        where: { id: dealId },
+        data: { status: "DELIVERED" }
+    });
+
+    await prisma.auditLog.create({
+        data: {
+            dealId,
+            userId: userId ?? undefined,
+            action: "ITEM_MARKED_DELIVERED",
+            entityType: "deal",
+            entityId: dealId,
+            deviceId: identityId,
+            ipAddress: ipAddress || undefined,
+            meta: {
+                previousStatus: deal.status,
+                newStatus: "DELIVERED",
+                timestamp: new Date().toISOString()
+            }
+        }
+    });
+
+    // Create system message (for both buyer and seller to see)
+    const buyerTotal = Number(deal.charge?.buyerTotal || 0);
+    const message = await prisma.message.create({
+        data: {
+            dealId,
+            type: "SYSTEM",
+            senderType: "ADMIN",
+            content: `Item has been marked as DELIVERED. Please confirm receipt within 24 hours.`,
+            createdAt: new Date(),
+        }
+    });
+
+    emitToDealRoom(dealId, "message:new", {
+        id: message.id,
+        dealId,
+        senderType: message.senderType,
+        senderRole: "seller",
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt.toISOString()
+    });
+
+    emitToDealRoom(dealId, "status:changed", {
+        dealId,
+        status: "DELIVERED",
+        timestamp: new Date().toISOString()
+    });
+
+    emitToDealRoom(dealId, "delivery:confirmed", {
+        dealId,
+        success: true,
+        message: "Item marked as delivered. Awaiting buyer confirmation.",
+        confirmDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    });
+
+    return {
+        success: true,
+        message: "Item marked as delivered successfully"
+    };
+}
