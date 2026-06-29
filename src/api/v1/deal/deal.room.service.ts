@@ -778,3 +778,119 @@ export async function markItemDelivered(
         message: "Item marked as delivered successfully"
     };
 }
+
+export async function cancelOrder(
+    dealId: number,
+    userId: number | null,
+    identityId: string,
+    reason?: string,
+    ipAddress?: string,
+    userAgent?: string,
+): Promise<{ success: boolean; message: string }> {
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: {
+            sellerId: true,
+            sellerIdentityId: true,
+            status: true,
+            amount: true,
+        }
+    });
+
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    if (!isSeller) {
+        throw new Error("Unauthorized: Only seller can cancel the order");
+    }
+
+    // Cannot cancel if already delivered or completed
+    if (deal.status === "DELIVERED" || deal.status === "COMPLETED") {
+        throw new Error("Cannot cancel: Item already delivered or deal completed");
+    }
+
+    const updatedDeal = await prisma.deal.update({
+        where: { id: dealId },
+        data: { status: "CANCELLED" }
+    });
+
+    await prisma.auditLog.create({
+        data: {
+            dealId,
+            userId: userId ?? undefined,
+            action: "ORDER_CANCELLED",
+            entityType: "deal",
+            entityId: dealId,
+            deviceId: identityId,
+            ipAddress: ipAddress || undefined,
+            meta: {
+                previousStatus: deal.status,
+                newStatus: "CANCELLED",
+                reason: reason || "Cancelled by seller",
+                timestamp: new Date().toISOString()
+            }
+        }
+    });
+
+    // Create system message (shows deal is closed)
+    const message = await prisma.message.create({
+        data: {
+            dealId,
+            type: "SYSTEM",
+            senderType: "ADMIN",
+            content: `❌ Order has been CANCELLED by seller${reason ? `: ${reason}` : ''}. This deal is now closed.`,
+            createdAt: new Date(),
+        }
+    });
+
+
+    emitToDealRoom(dealId, "message:new", {
+        id: message.id,
+        dealId,
+        senderType: message.senderType,
+        senderRole: "admin",
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt.toISOString()
+    });
+
+    // Send status:changed (updates progress bar to cancelled state)
+    emitToDealRoom(dealId, "status:changed", {
+        dealId,
+        status: "CANCELLED",
+        timestamp: new Date().toISOString()
+    });
+
+
+    emitToDealRoom(dealId, "deal:closed", {
+        dealId,
+        reason: "cancelled",
+        message: "This deal has been cancelled by the seller.",
+        timestamp: new Date().toISOString()
+    });
+
+    // If payment was made, trigger refund flow
+    const payment = await prisma.payment.findFirst({
+        where: {
+            dealId,
+            status: "VERIFIED"
+        }
+    });
+
+    if (payment) {
+        // Queue refund job or mark for refund
+        console.log(`⚠️ Payment ${payment.trxId} needs refund for cancelled deal ${dealId}`);
+        // You can trigger a refund API here or log for manual review
+        await prisma.payment.update({
+            where: { id: payment.id },
+            data: { status: "REFUND_INITIATED" }
+        });
+    }
+
+    return {
+        success: true,
+        message: "Order cancelled successfully"
+    };
+}
