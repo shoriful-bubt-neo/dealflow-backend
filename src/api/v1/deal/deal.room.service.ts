@@ -3,6 +3,7 @@ import axios from "axios";
 import prisma from "../../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import type { MessageType, MessageSenderType, DealStatus } from "../../../generated/prisma/enums.js";
+import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 
 const SSL_COMMERZ_BASE_URL =
     process.env.SSL_COMMERZ_BASE_URL?.replace(/\/$/, "") ||
@@ -414,9 +415,35 @@ export async function confirmSslCommerzPayment(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string; transactionId?: string }> {
-    console.log("params: ", params);
+    // console.log("params: ", params);
     if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
         throw new Error("SSLCommerz store credentials are not configured");
+    }
+
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: {
+            paymentMethodId: true,
+            status: true,
+            charge: { select: { buyerTotal: true } }
+        },
+    });
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    const existingVerified = await prisma.payment.findFirst({
+        where: {
+            dealId,
+            status: "VERIFIED",
+        },
+    });
+    if (existingVerified) {
+        return {
+            success: true,
+            message: "Payment already verified",
+            transactionId: existingVerified.trxId,
+        };
     }
 
     const valId = String(params.val_id || params.valId || params.value_a || "").trim();
@@ -439,25 +466,24 @@ export async function confirmSslCommerzPayment(
         throw new Error("Invalid SSLCommerz validation response");
     }
 
-    if (validated.status !== "VALID" && validated.status !== "VALIDATED") {
-        throw new Error(`SSLCommerz transaction validation failed: ${validated.status}`);
-    }
-
+    const isSuccess = validated.status === "VALID" || validated.status === "VALIDATED";
     const transactionId = String(validated.tran_id || "");
     const paidAmount = Number(validated.amount || 0);
-    const sslPayment = await prisma.payment.findFirst({
+
+    const paymentStatus = isSuccess ? "VERIFIED" : "FAILED";
+    const existingPayment = await prisma.payment.findFirst({
         where: { dealId, trxId: transactionId },
     });
 
-    if (!sslPayment) {
+    if (!existingPayment) {
         await prisma.payment.create({
             data: {
                 dealId,
-                trxId: transactionId,
-                paymentMethodId: deal.paymentMethodId ?? 1,
+                trxId: transactionId || `FAILED-${Date.now()}`,
+                paymentMethodId: deal.paymentMethodId ?? undefined,
                 direction: "IN",
                 idempotencyKey: uuidv4(),
-                status: "VERIFIED",
+                status: paymentStatus,
                 ipAddress: ipAddress || undefined,
                 deviceInfo: userAgent || undefined,
                 gatewayResponse: validated,
@@ -465,62 +491,135 @@ export async function confirmSslCommerzPayment(
         });
     } else {
         await prisma.payment.update({
-            where: { id: sslPayment.id },
+            where: { id: existingPayment.id },
             data: {
-                status: "VERIFIED",
+                status: paymentStatus,
                 gatewayResponse: validated,
             },
         });
     }
 
-    const deal = await prisma.deal.findUnique({
-        where: { id: dealId },
-        select: { status: true },
-    });
+    if (isSuccess) {
+        const expectedAmount = Number(deal.charge?.buyerTotal || 0);
+        if (Math.abs(paidAmount - expectedAmount) > 0.01) {
+            console.warn(`Amount mismatch: expected ${expectedAmount}, got ${paidAmount}`);
+        }
 
-    if (!deal) {
-        throw new Error("Deal not found");
-    }
+        if (deal.status === "CREATED" || deal.status === "AWAITING_PAYMENT" || deal.status === "PAYMENT_PENDING") {
+            await prisma.deal.update({
+                where: { id: dealId },
+                data: { status: "PAID" },
+            });
+        }
 
-    if (deal.status === "CREATED" || deal.status === "AWAITING_PAYMENT") {
-        await prisma.deal.update({
-            where: { id: dealId },
-            data: { status: "PAID" },
-        });
-    }
-
-    await prisma.auditLog.create({
-        data: {
-            dealId,
-            action: "SSL_COMMERZ_PAYMENT_CONFIRMED",
-            entityType: "deal",
-            entityId: dealId,
-            deviceId: userAgent || undefined,
-            ipAddress: ipAddress || undefined,
-            meta: {
-                transactionId,
-                paidAmount,
-                currentStatus: deal.status,
-                validationStatus: validated.status,
+        await prisma.auditLog.create({
+            data: {
+                dealId,
+                action: "SSL_COMMERZ_PAYMENT_CONFIRMED",
+                entityType: "deal",
+                entityId: dealId,
+                deviceId: userAgent || undefined,
+                ipAddress: ipAddress || undefined,
+                meta: {
+                    transactionId,
+                    paidAmount,
+                    previousStatus: deal.status,
+                    newStatus: "PAID",
+                    validationStatus: validated.status,
+                },
             },
-        },
-    });
+        });
 
-    await prisma.message.create({
-        data: {
+        const existingMsg = await prisma.message.findFirst({
+            where: {
+                dealId,
+                content: { contains: `SSLCommerz payment successful for transaction ${transactionId}` }
+            }
+        });
+        const paymentMessage = existingMsg ?? await prisma.message.create({
+            data: {
+                dealId,
+                type: "SYSTEM",
+                senderType: "ADMIN",
+                content: `SSLCommerz payment successful for transaction ${transactionId}. Amount paid: ৳${paidAmount}.`,
+                createdAt: new Date(),
+            },
+        });
+
+        emitToDealRoom(dealId, "message:new", {
+            id: paymentMessage.id,
             dealId,
-            type: "SYSTEM",
-            senderType: "ADMIN",
-            content: `SSLCommerz payment successful for transaction ${transactionId}. Amount paid: ৳${paidAmount}.`,
-            createdAt: new Date(),
-        },
-    });
+            senderType: paymentMessage.senderType,
+            senderRole: "admin",
+            content: paymentMessage.content,
+            type: paymentMessage.type,
+            createdAt: paymentMessage.createdAt.toISOString(),
+        });
 
-    return {
-        success: true,
-        message: "Payment verified successfully",
-        transactionId,
-    };
+        emitToDealRoom(dealId, "payment:confirmed", {
+            dealId,
+            success: true,
+            transactionId,
+            amount: paidAmount,
+        });
+
+        return {
+            success: true,
+            message: "Payment verified successfully",
+            transactionId,
+        };
+    } else {
+        await prisma.auditLog.create({
+            data: {
+                dealId,
+                action: "SSL_COMMERZ_PAYMENT_FAILED",
+                entityType: "deal",
+                entityId: dealId,
+                deviceId: userAgent || undefined,
+                ipAddress: ipAddress || undefined,
+                meta: {
+                    transactionId,
+                    paidAmount,
+                    currentStatus: deal.status,
+                    validationStatus: validated.status,
+                    error: validated.error || "Payment failed",
+                },
+            },
+        });
+
+        const paymentMessage = await prisma.message.create({
+            data: {
+                dealId,
+                type: "SYSTEM",
+                senderType: "ADMIN",
+                content: `SSLCommerz payment failed. Transaction: ${transactionId || "N/A"}. Reason: ${validated.error || "Unknown error"}.`,
+                createdAt: new Date(),
+            },
+        });
+
+        emitToDealRoom(dealId, "message:new", {
+            id: paymentMessage.id,
+            dealId,
+            senderType: paymentMessage.senderType,
+            senderRole: "admin",
+            content: paymentMessage.content,
+            type: paymentMessage.type,
+            createdAt: paymentMessage.createdAt.toISOString(),
+        });
+
+        emitToDealRoom(dealId, "payment:failed", {
+            dealId,
+            success: false,
+            message: "Payment failed. Please try again.",
+            transactionId,
+        });
+
+        return {
+            success: false,
+            message: "Payment failed",
+            transactionId,
+        };
+    }
 }
 
 export async function submitPayment(
