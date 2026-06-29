@@ -320,7 +320,7 @@ export async function handleSslCommerzCallback(
     req: Request,
     res: Response,
 ): Promise<void | Response> {
-    let dealId: number | null = null; 
+    let dealId: number | null = null;
     try {
         dealId = Number(req.params.dealId);
         if (!dealId || !Number.isInteger(dealId) || dealId <= 0) {
@@ -336,19 +336,21 @@ export async function handleSslCommerzCallback(
         );
 
         const frontendBase =
+            process.env.SSL_COMMERZ_FRONTEND_URL?.replace(/\/$/, "") ||
             process.env.SSL_COMMERZ_APP_URL?.replace(/\/$/, "") ||
             process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
             "http://localhost:3000";
+
         const redirectUrl = `${frontendBase}/deal-room?dealId=${dealId}`;
 
         return res.redirect(redirectUrl);
     } catch (error: unknown) {
         const frontendBase =
+            process.env.SSL_COMMERZ_FRONTEND_URL?.replace(/\/$/, "") ||
             process.env.SSL_COMMERZ_APP_URL?.replace(/\/$/, "") ||
             process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ||
             "http://localhost:3000";
-        const message = error instanceof Error ? error.message : "Payment verification failed";
-        const redirectUrl = `${frontendBase}/deal-room?dealId=${dealId}`;
+        const redirectUrl = `${frontendBase}/deal-room?dealId=${dealId || ""}`;
         return res.redirect(redirectUrl);
     }
 }

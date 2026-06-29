@@ -338,7 +338,7 @@ async function createDealTransaction(
 
     const combinedContent = `Welcome to Deal Room ${paymentRef}. I'm your admin and will supervise this transaction.\n\n` +
       `Deal: ${input.item} - ${input.amount} BDT\n\n` +
-      `Please use the payment numbers on the left panel to send funds. Once confirmed, I'll update the status.`;
+      `Please use the payment method on the left panel to send funds. Once confirmed, I'll update the status.`;
 
     await tx.message.create({
       data: {
