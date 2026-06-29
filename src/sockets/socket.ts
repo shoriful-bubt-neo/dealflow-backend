@@ -1,7 +1,13 @@
 import { Server as HTTPServer } from "http";
 import { Server, Socket } from "socket.io";
 import { verifyToken, JWTPayload } from "../utils/jwt.js";
-import { sendMessage, submitPayment, updateDealStatus } from "../api/v1/deal/deal.room.service.js";
+import {
+    sendMessage,
+    submitPayment,
+    updateDealStatus,
+    markItemDelivered,
+    cancelOrder,
+} from "../api/v1/deal/deal.room.service.js";
 import { setSocketServer } from "./roomEmitter.js";
 import { parse as parseCookie } from "cookie";
 
@@ -50,21 +56,10 @@ export function initializeSocket(httpServer: HTTPServer): Server {
         const user = socket.user;
         socket.join(`deal-${user.dealId}`);
 
+        // ----- Existing event handlers -----
         socket.on("message", async (data: { content: string; type?: string }, callback?: any) => {
             try {
                 if (!socket.user) throw new Error("Unauthorized");
-
-                // const newMessage = await prisma.message.create({
-                //     data: {
-                //         dealId: socket.user.dealId,
-                //         senderType: socket.user.role === "BUYER" ? "BUYER" :
-                //             socket.user.role === "SELLER" ? "SELLER" : "ADMIN",
-                //         content: data.content,
-                //         type: data.type || "TEXT",
-                //         createdAt: new Date(),
-                //         senderId: userId || null,
-                //     },
-                // });
 
                 const newMessage = await sendMessage(
                     socket.user.dealId,
@@ -82,8 +77,8 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                         user.role === "BUYER"
                             ? "buyer"
                             : user.role === "SELLER"
-                                ? "seller"
-                                : "admin",
+                            ? "seller"
+                            : "admin",
                     content: newMessage.content,
                     type: newMessage.type,
                     createdAt: newMessage.createdAt,
@@ -100,10 +95,6 @@ export function initializeSocket(httpServer: HTTPServer): Server {
             try {
                 if (!socket.user) throw new Error("Unauthorized");
 
-                // const updatedDeal = await prisma.deal.update({
-                //     where: { id: socket.user.dealId },
-                //     data: { status: data.status },
-                // });
                 const updatedDeal = await updateDealStatus(
                     user.dealId,
                     user.userId || null,
@@ -140,6 +131,48 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                 });
                 callback?.({ success: true });
             } catch (error) {
+                callback?.({ success: false, error: (error as Error).message });
+            }
+        });
+
+        // delivery:confirm event handler (Seller marks as delivered)
+        socket.on("delivery:confirm", async (data: { dealId: number }, callback?: any) => {
+            try {
+                if (!socket.user) throw new Error("Unauthorized");
+
+                // Call the service function directly
+                const result = await markItemDelivered(
+                    data.dealId || user.dealId,
+                    socket.user.userId || null,
+                    socket.user.identityId,
+                    socket.handshake.address, // IP address
+                    socket.handshake.headers["user-agent"] as string | undefined,
+                );
+
+                callback?.({ success: true, data: result });
+            } catch (error) {
+                console.error("Socket delivery:confirm error:", error);
+                callback?.({ success: false, error: (error as Error).message });
+            }
+        });
+
+        // order:cancel event handler (Seller cancels order)
+        socket.on("order:cancel", async (data: { dealId: number; reason?: string }, callback?: any) => {
+            try {
+                if (!socket.user) throw new Error("Unauthorized");
+
+                const result = await cancelOrder(
+                    data.dealId || user.dealId,
+                    socket.user.userId || null,
+                    socket.user.identityId,
+                    data.reason,
+                    socket.handshake.address,
+                    socket.handshake.headers["user-agent"] as string | undefined,
+                );
+
+                callback?.({ success: true, data: result });
+            } catch (error) {
+                console.error("Socket order:cancel error:", error);
                 callback?.({ success: false, error: (error as Error).message });
             }
         });
