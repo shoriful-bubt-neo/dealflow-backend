@@ -41,6 +41,8 @@ export interface DealRoomData {
         type: string;
         config: any;
     } | null;
+    deliveredAt: string | null;
+    buyerConfirmationDeadline: string | null;
 }
 
 export interface MessageData {
@@ -114,6 +116,8 @@ export async function getDealRoom(
             type: deal.paymentMethod.type,
             config: deal.paymentMethod.config as any,
         } : null,
+        deliveredAt: deal.deliveredAt?.toISOString() ?? null,
+        buyerConfirmationDeadline: deal.buyerConfirmationDeadline?.toISOString() ?? null,
     };
 }
 
@@ -715,10 +719,15 @@ export async function markItemDelivered(
         throw new Error(`Invalid deal status: ${deal.status}. Deal must be PAID to mark as delivered.`);
     }
 
-    // Update deal status to DELIVERED
+    // Update deal status to DELIVERED and persist the buyer confirmation deadline
+    const deadline = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const updatedDeal = await prisma.deal.update({
         where: { id: dealId },
-        data: { status: "DELIVERED" }
+        data: {
+            status: "DELIVERED",
+            deliveredAt: new Date(),
+            buyerConfirmationDeadline: deadline,
+        },
     });
 
     await prisma.auditLog.create({
@@ -745,7 +754,7 @@ export async function markItemDelivered(
             dealId,
             type: "SYSTEM",
             senderType: "ADMIN",
-            content: `Item has been marked as DELIVERED. Please confirm receipt within 24 hours.`,
+            content: `Item has been marked as DELIVERED. Buyer, please confirm receipt within 24 hours.`,
             createdAt: new Date(),
         }
     });
@@ -766,16 +775,19 @@ export async function markItemDelivered(
         timestamp: new Date().toISOString()
     });
 
+    const confirmDeadline = deadline.toISOString();
+
     emitToDealRoom(dealId, "delivery:confirmed", {
         dealId,
         success: true,
         message: "Item marked as delivered. Awaiting buyer confirmation.",
-        confirmDeadline: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        confirmDeadline,
     });
 
     return {
         success: true,
-        message: "Item marked as delivered successfully"
+        message: "Item marked as delivered successfully",
+        confirmDeadline,
     };
 }
 
