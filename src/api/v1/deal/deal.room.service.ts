@@ -791,6 +791,86 @@ export async function markItemDelivered(
     };
 }
 
+export async function autoReleaseDeliveredDeals(): Promise<number> {
+    const now = new Date();
+    const deals = await prisma.deal.findMany({
+        where: {
+            status: "DELIVERED",
+            buyerConfirmationDeadline: {
+                lte: now,
+            },
+        },
+        select: {
+            id: true,
+            status: true,
+        },
+    });
+
+    let releasedCount = 0;
+
+    for (const deal of deals) {
+        const updatedDeal = await prisma.deal.update({
+            where: { id: deal.id },
+            data: {
+                status: "PAYMENT_RELEASED",
+                buyerConfirmationDeadline: null,
+            },
+        });
+
+        await prisma.auditLog.create({
+            data: {
+                dealId: deal.id,
+                action: "AUTO_RELEASE_AFTER_DELIVERY_TIMEOUT",
+                entityType: "deal",
+                entityId: deal.id,
+                meta: {
+                    previousStatus: deal.status,
+                    newStatus: updatedDeal.status,
+                    releasedAt: now.toISOString(),
+                    reason: "Buyer did not confirm delivery within 24 hours",
+                },
+            },
+        });
+
+        const message = await prisma.message.create({
+            data: {
+                dealId: deal.id,
+                type: "SYSTEM",
+                senderType: "ADMIN",
+                content: "Buyer did not confirm receipt within 24 hours. Payment has been released to the seller.",
+                createdAt: new Date(),
+            },
+        });
+
+        emitToDealRoom(deal.id, "message:new", {
+            id: message.id,
+            dealId: deal.id,
+            senderType: message.senderType,
+            senderRole: "admin",
+            content: message.content,
+            type: message.type,
+            createdAt: message.createdAt.toISOString(),
+        });
+
+        emitToDealRoom(deal.id, "status:changed", {
+            dealId: deal.id,
+            status: updatedDeal.status,
+            timestamp: new Date().toISOString(),
+        });
+
+        emitToDealRoom(deal.id, "deal:closed", {
+            dealId: deal.id,
+            reason: "auto_released",
+            message: "Deal has been automatically released after buyer timeout.",
+            timestamp: new Date().toISOString(),
+        });
+
+        releasedCount += 1;
+    }
+
+    return releasedCount;
+}
+
 export async function cancelOrder(
     dealId: number,
     userId: number | null,
