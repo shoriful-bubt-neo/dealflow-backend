@@ -181,6 +181,8 @@ model Deal {
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  deliveredAt DateTime? @map("delivered_at")
+  buyerConfirmationDeadline DateTime? @map("buyer_confirmation_deadline")
 
   @@index([buyerId])
   @@index([sellerId])
