@@ -976,6 +976,108 @@ export async function autoReleaseDeliveredDeals(): Promise<number> {
     return releasedCount;
 }
 
+/**
+ * Production refund using existing ledger models only:
+ * EscrowStatus.REFUNDED + TransactionType.REFUND + PaymentDirection.OUT
+ * PaymentStatus allows only PENDING | VERIFIED | FAILED — never REFUND_INITIATED.
+ */
+async function processBuyerRefund(
+    tx: Prisma.TransactionClient,
+    params: {
+        dealId: number;
+        amount: Prisma.Decimal;
+        payment: { id: number; trxId: string; paymentMethodId: number };
+        userId?: number | null;
+        identityId?: string;
+        ipAddress?: string;
+    },
+): Promise<{ refunded: boolean; alreadyProcessed: boolean }> {
+    const { dealId, amount, payment, userId, identityId, ipAddress } = params;
+
+    const existingRefundTx = await tx.transaction.findFirst({
+        where: {
+            dealId,
+            type: "REFUND",
+            referenceId: payment.id,
+            referenceType: "payment",
+        },
+    });
+    if (existingRefundTx) {
+        return { refunded: true, alreadyProcessed: true };
+    }
+
+    const escrow = await tx.escrow.findUnique({ where: { dealId } });
+    if (!escrow) {
+        await tx.escrow.create({
+            data: {
+                dealId,
+                amount,
+                status: "REFUNDED",
+                releasedAt: new Date(),
+            },
+        });
+    } else if (escrow.status === "HELD") {
+        await tx.escrow.update({
+            where: { dealId },
+            data: {
+                status: "REFUNDED",
+                releasedAt: new Date(),
+            },
+        });
+    } else if (escrow.status === "RELEASED") {
+        throw new Error("Cannot refund: escrow already released to seller");
+    }
+
+    await tx.transaction.create({
+        data: {
+            dealId,
+            type: "REFUND",
+            amount,
+            referenceId: payment.id,
+            referenceType: "payment",
+        },
+    });
+
+    const refundTrxId = `REFUND-${payment.trxId}`;
+    const existingOutPayment = await tx.payment.findFirst({
+        where: { dealId, trxId: refundTrxId },
+    });
+    if (!existingOutPayment) {
+        await tx.payment.create({
+            data: {
+                dealId,
+                trxId: refundTrxId,
+                paymentMethodId: payment.paymentMethodId,
+                direction: "OUT",
+                idempotencyKey: `refund-payment-${payment.id}`,
+                status: "VERIFIED",
+            },
+        });
+    }
+
+    await tx.auditLog.create({
+        data: {
+            dealId,
+            userId: userId ?? undefined,
+            action: "BUYER_REFUND_PROCESSED",
+            entityType: "payment",
+            entityId: payment.id,
+            deviceId: identityId,
+            ipAddress: ipAddress || undefined,
+            meta: {
+                paymentId: payment.id,
+                trxId: payment.trxId,
+                refundTrxId,
+                amount: amount.toString(),
+                escrowStatus: "REFUNDED",
+                timestamp: new Date().toISOString(),
+            },
+        },
+    });
+
+    return { refunded: true, alreadyProcessed: false };
+}
+
 export async function cancelOrder(
     dealId: number,
     userId: number | null,
@@ -983,7 +1085,7 @@ export async function cancelOrder(
     reason?: string,
     ipAddress?: string,
     userAgent?: string,
-): Promise<{ success: boolean; message: string }> {
+): Promise<{ success: boolean; message: string; refundInitiated?: boolean }> {
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -1003,45 +1105,79 @@ export async function cancelOrder(
         throw new Error("Unauthorized: Only seller can cancel the order");
     }
 
-    // Cannot cancel if already delivered or completed
-    if (deal.status === "DELIVERED" || deal.status === "COMPLETED") {
+    if (
+        deal.status === "DELIVERED" ||
+        deal.status === "COMPLETED" ||
+        deal.status === "PAYMENT_RELEASED" ||
+        deal.status === "CANCELLED" ||
+        deal.status === "EXPIRED"
+    ) {
         throw new Error("Cannot cancel: Item already delivered or deal completed");
     }
 
-    const updatedDeal = await prisma.deal.update({
-        where: { id: dealId },
-        data: { status: "CANCELLED" }
-    });
+    const { message, refundInitiated } = await prisma.$transaction(async (tx) => {
+        await tx.deal.update({
+            where: { id: dealId },
+            data: { status: "CANCELLED" },
+        });
 
-    await prisma.auditLog.create({
-        data: {
-            dealId,
-            userId: userId ?? undefined,
-            action: "ORDER_CANCELLED",
-            entityType: "deal",
-            entityId: dealId,
-            deviceId: identityId,
-            ipAddress: ipAddress || undefined,
-            meta: {
-                previousStatus: deal.status,
-                newStatus: "CANCELLED",
-                reason: reason || "Cancelled by seller",
-                timestamp: new Date().toISOString()
-            }
+        await tx.auditLog.create({
+            data: {
+                dealId,
+                userId: userId ?? undefined,
+                action: "ORDER_CANCELLED",
+                entityType: "deal",
+                entityId: dealId,
+                deviceId: identityId,
+                ipAddress: ipAddress || undefined,
+                meta: {
+                    previousStatus: deal.status,
+                    newStatus: "CANCELLED",
+                    reason: reason || "Cancelled by seller",
+                    timestamp: new Date().toISOString(),
+                },
+            },
+        });
+
+        const payment = await tx.payment.findFirst({
+            where: {
+                dealId,
+                status: "VERIFIED",
+                direction: "IN",
+            },
+        });
+
+        let refundInitiated = false;
+        if (payment) {
+            const refundResult = await processBuyerRefund(tx, {
+                dealId,
+                amount: deal.amount,
+                payment: {
+                    id: payment.id,
+                    trxId: payment.trxId,
+                    paymentMethodId: payment.paymentMethodId,
+                },
+                userId,
+                identityId,
+                ipAddress,
+            });
+            refundInitiated = refundResult.refunded;
         }
-    });
 
-    // Create system message (shows deal is closed)
-    const message = await prisma.message.create({
-        data: {
-            dealId,
-            type: "SYSTEM",
-            senderType: "ADMIN",
-            content: `❌ Order has been CANCELLED by seller${reason ? `: ${reason}` : ''}. This deal is now closed.`,
-            createdAt: new Date(),
-        }
-    });
+        const message = await tx.message.create({
+            data: {
+                dealId,
+                type: "SYSTEM",
+                senderType: "ADMIN",
+                content: refundInitiated
+                    ? `❌ Order has been CANCELLED by seller${reason ? `: ${reason}` : ""}. Buyer refund has been processed. This deal is now closed.`
+                    : `❌ Order has been CANCELLED by seller${reason ? `: ${reason}` : ""}. This deal is now closed.`,
+                createdAt: new Date(),
+            },
+        });
 
+        return { message, refundInitiated };
+    });
 
     emitToDealRoom(dealId, "message:new", {
         id: message.id,
@@ -1050,44 +1186,27 @@ export async function cancelOrder(
         senderRole: "admin",
         content: message.content,
         type: message.type,
-        createdAt: message.createdAt.toISOString()
+        createdAt: message.createdAt.toISOString(),
     });
 
-    // Send status:changed (updates progress bar to cancelled state)
     emitToDealRoom(dealId, "status:changed", {
         dealId,
         status: "CANCELLED",
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
     });
-
 
     emitToDealRoom(dealId, "deal:closed", {
         dealId,
         reason: "cancelled",
         message: "This deal has been cancelled by the seller.",
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
     });
-
-    // If payment was made, trigger refund flow
-    const payment = await prisma.payment.findFirst({
-        where: {
-            dealId,
-            status: "VERIFIED"
-        }
-    });
-
-    if (payment) {
-        // Queue refund job or mark for refund
-        console.log(`⚠️ Payment ${payment.trxId} needs refund for cancelled deal ${dealId}`);
-        // You can trigger a refund API here or log for manual review
-        await prisma.payment.update({
-            where: { id: payment.id },
-            data: { status: "REFUND_INITIATED" }
-        });
-    }
 
     return {
         success: true,
-        message: "Order cancelled successfully"
+        message: refundInitiated
+            ? "Order cancelled successfully. Buyer refund has been processed."
+            : "Order cancelled successfully",
+        refundInitiated,
     };
 }
