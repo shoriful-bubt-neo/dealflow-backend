@@ -196,7 +196,7 @@ export async function sendMessage(
         throw new Error("Unauthorized: Not a participant in this deal");
     }
 
-    const senderType: MessageSenderType = isBuyer || isSeller ? "USER" : "SYSTEM";
+    const senderType: MessageSenderType = isBuyer ? "BUYER" : isSeller ? "SELLER" : "ADMIN";
     const senderRole = isBuyer ? "buyer" : isSeller ? "seller" : "admin";
 
     const message = await prisma.message.create({
@@ -788,6 +788,111 @@ export async function markItemDelivered(
         success: true,
         message: "Item marked as delivered successfully",
         confirmDeadline,
+    };
+}
+
+export async function confirmDeliveryByBuyer(
+    dealId: number,
+    userId: number | null,
+    identityId: string,
+    ipAddress?: string,
+    userAgent?: string,
+): Promise<{ success: boolean; message: string }> {
+    const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: {
+            buyerId: true,
+            buyerIdentityId: true,
+            status: true,
+            deliveredAt: true,
+            buyerConfirmationDeadline: true,
+        }
+    });
+
+    if (!deal) {
+        throw new Error("Deal not found");
+    }
+
+    const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
+    if (!isBuyer) {
+        throw new Error("Unauthorized: Only buyer can confirm delivery");
+    }
+
+    // Validate deal status - must be DELIVERED to confirm
+    if (deal.status !== "DELIVERED") {
+        throw new Error(`Invalid deal status: ${deal.status}. Deal must be DELIVERED to confirm receipt.`);
+    }
+
+    // Check if confirmation deadline has passed
+    const now = new Date();
+    if (deal.buyerConfirmationDeadline && deal.buyerConfirmationDeadline < now) {
+        throw new Error("Confirmation deadline has expired. Payment has been auto-released to seller.");
+    }
+
+    // Update deal to PAYMENT_RELEASED
+    const updatedDeal = await prisma.deal.update({
+        where: { id: dealId },
+        data: {
+            status: "PAYMENT_RELEASED",
+            buyerConfirmationDeadline: null,
+        },
+    });
+
+    await prisma.auditLog.create({
+        data: {
+            dealId,
+            userId: userId ?? undefined,
+            action: "DELIVERY_CONFIRMED_BY_BUYER",
+            entityType: "deal",
+            entityId: dealId,
+            deviceId: identityId,
+            ipAddress: ipAddress || undefined,
+            meta: {
+                previousStatus: deal.status,
+                newStatus: "PAYMENT_RELEASED",
+                timestamp: new Date().toISOString(),
+                confirmedAt: now.toISOString(),
+            }
+        }
+    });
+
+    // Create system message
+    const message = await prisma.message.create({
+        data: {
+            dealId,
+            type: "SYSTEM",
+            senderType: "ADMIN",
+            content: "Buyer has confirmed receipt of the item. Payment has been released to seller.",
+            createdAt: new Date(),
+        }
+    });
+
+    emitToDealRoom(dealId, "message:new", {
+        id: message.id,
+        dealId,
+        senderType: message.senderType,
+        senderRole: "admin",
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt.toISOString()
+    });
+
+    emitToDealRoom(dealId, "status:changed", {
+        dealId,
+        status: "PAYMENT_RELEASED",
+        timestamp: new Date().toISOString()
+    });
+
+    emitToDealRoom(dealId, "deal:closed", {
+        dealId,
+        reason: "delivery_confirmed",
+        message: "Deal completed successfully!",
+        timestamp: new Date().toISOString(),
+    });
+
+    return {
+        success: true,
+        message: "Delivery confirmed successfully. Payment has been released to seller."
     };
 }
 
