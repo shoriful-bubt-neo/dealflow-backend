@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import * as dealRoomService from "./deal.room.service.js";
 import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 
 const sendMessageSchema = z.object({
     content: z.string().trim().min(1, "Message cannot be empty").max(2000),
@@ -12,8 +12,25 @@ const initiatePaymentSchema = z.object({
     amount: z.number().positive("Amount must be positive"),
 });
 
+/** Matches prisma DealStatus + frontend aliases (normalized in service). */
 const updateStatusSchema = z.object({
-    status: z.enum(["CREATED", "PAYMENT_PENDING", "PAYMENT_RECEIVED", "ITEM_DELIVERED", "PAYMENT_RELEASED", "CANCELLED", "ON_HOLD"]),
+    status: z.enum([
+        // prisma DealStatus
+        "CREATED",
+        "AWAITING_PAYMENT",
+        "PAID",
+        "DELIVERED",
+        "COMPLETED",
+        "PAYMENT_RELEASED",
+        "DISPUTED",
+        "CANCELLED",
+        "EXPIRED",
+        // aliases accepted from frontend
+        "PAYMENT_PENDING",
+        "PAYMENT_RECEIVED",
+        "ITEM_DELIVERED",
+        "ON_HOLD",
+    ]),
 });
 
 const submitPaymentSchema = z.object({
@@ -21,6 +38,14 @@ const submitPaymentSchema = z.object({
     paymentMethod: z.coerce.number().positive("Payment method ID is required"),
     amount: z.number().positive("Amount must be positive"),
 });
+
+function validationErrorResponse(res: Response, error: ZodError) {
+    return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: error.issues,
+    });
+}
 
 export async function handleGetDealRoom(
     req: Request,
@@ -137,13 +162,8 @@ export async function handleSendMessage(
 
         res.status(201).json({ success: true, data: message });
     } catch (error: unknown) {
-        if (error instanceof Error && error.name === "ZodError") {
-            const zodError = error as any;
-            return res.status(400).json({
-                success: false,
-                message: "Validation error",
-                errors: zodError.errors,
-            });
+        if (error instanceof ZodError) {
+            return validationErrorResponse(res, error);
         }
 
         if (error instanceof Error) {
@@ -188,13 +208,8 @@ export async function handleUpdateDealStatus(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error && error.name === "ZodError") {
-            const zodError = error as any;
-            return res.status(400).json({
-                success: false,
-                message: "Validation error",
-                errors: zodError.errors,
-            });
+        if (error instanceof ZodError) {
+            return validationErrorResponse(res, error);
         }
 
         if (error instanceof Error) {
@@ -241,13 +256,8 @@ export async function handleSubmitPayment(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error && error.name === "ZodError") {
-            const zodError = error as any;
-            return res.status(400).json({
-                success: false,
-                message: "Validation error",
-                errors: zodError.errors,
-            });
+        if (error instanceof ZodError) {
+            return validationErrorResponse(res, error);
         }
 
         if (error instanceof Error) {
@@ -294,13 +304,8 @@ export async function handleInitiateSslCommerzPayment(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error && error.name === "ZodError") {
-            const zodError = error as any;
-            return res.status(400).json({
-                success: false,
-                message: "Validation error",
-                errors: zodError.errors,
-            });
+        if (error instanceof ZodError) {
+            return validationErrorResponse(res, error);
         }
 
         if (error instanceof Error) {

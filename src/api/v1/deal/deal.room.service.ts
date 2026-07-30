@@ -43,6 +43,13 @@ export interface DealRoomData {
     } | null;
     deliveredAt: string | null;
     buyerConfirmationDeadline: string | null;
+    activeDispute: {
+        id: number;
+        status: string;
+        canBuyerSubmit: boolean;
+        canSellerSubmit: boolean;
+        chatLocked: boolean;
+    } | null;
 }
 
 export interface MessageData {
@@ -118,6 +125,33 @@ export async function getDealRoom(
         } : null,
         deliveredAt: deal.deliveredAt?.toISOString() ?? null,
         buyerConfirmationDeadline: deal.buyerConfirmationDeadline?.toISOString() ?? null,
+        activeDispute: await (async () => {
+            const d = await prisma.dispute.findFirst({
+                where: {
+                    dealId,
+                    status: {
+                        in: [
+                            "AWAITING_BUYER_EVIDENCE",
+                            "AWAITING_SELLER_RESPONSE",
+                            "UNDER_REVIEW",
+                        ],
+                    },
+                },
+                select: { id: true, status: true },
+                orderBy: { createdAt: "desc" },
+            });
+            if (!d) return null;
+            return {
+                id: d.id,
+                status: d.status,
+                canBuyerSubmit: d.status === "AWAITING_BUYER_EVIDENCE",
+                canSellerSubmit: d.status === "AWAITING_SELLER_RESPONSE",
+                chatLocked:
+                    d.status === "UNDER_REVIEW" ||
+                    d.status === "RESOLVED" ||
+                    d.status === "CLOSED",
+            };
+        })(),
     };
 }
 
@@ -182,6 +216,7 @@ export async function sendMessage(
             sellerId: true,
             buyerIdentityId: true,
             sellerIdentityId: true,
+            status: true,
         },
     });
 
@@ -194,6 +229,28 @@ export async function sendMessage(
 
     if (!isBuyer && !isSeller) {
         throw new Error("Unauthorized: Not a participant in this deal");
+    }
+
+    // Free chat is disabled during disputes — use /dispute/statement (one-shot)
+    if (deal.status === "DISPUTED") {
+        const active = await prisma.dispute.findFirst({
+            where: {
+                dealId,
+                status: {
+                    in: [
+                        "AWAITING_BUYER_EVIDENCE",
+                        "AWAITING_SELLER_RESPONSE",
+                        "UNDER_REVIEW",
+                    ],
+                },
+            },
+            select: { status: true },
+        });
+        if (active) {
+            throw new Error(
+                "Use dispute statement endpoint. Each party may submit only once.",
+            );
+        }
     }
 
     const senderType: MessageSenderType = isBuyer ? "BUYER" : isSeller ? "SELLER" : "ADMIN";
@@ -256,17 +313,28 @@ export async function updateDealStatus(
         throw new Error("Unauthorized: Not a participant in this deal");
     }
 
-    const normalizedStatus = typeof newStatus === "string" && newStatus === "PAYMENT_PENDING"
-        ? "AWAITING_PAYMENT"
-        : newStatus;
-    const validStatuses = [
+    const statusAliases: Record<string, DealStatus> = {
+        PAYMENT_PENDING: "AWAITING_PAYMENT",
+        PAYMENT_RECEIVED: "PAID",
+        ITEM_DELIVERED: "DELIVERED",
+        ON_HOLD: "DISPUTED",
+    };
+
+    const normalizedStatus =
+        typeof newStatus === "string" && statusAliases[newStatus]
+            ? statusAliases[newStatus]
+            : (newStatus as DealStatus);
+
+    const validStatuses: DealStatus[] = [
         "CREATED",
         "AWAITING_PAYMENT",
         "PAID",
-        "ITEM_DELIVERED",
+        "DELIVERED",
         "PAYMENT_RELEASED",
         "CANCELLED",
-        "ON_HOLD",
+        "DISPUTED",
+        "COMPLETED",
+        "EXPIRED",
     ];
     if (!validStatuses.includes(normalizedStatus)) {
         throw new Error("Invalid status");
@@ -275,7 +343,7 @@ export async function updateDealStatus(
     const updatedDeal = await prisma.deal.update({
         where: { id: dealId },
         data: {
-            status: normalizedStatus as DealStatus,
+            status: normalizedStatus,
         },
         select: { status: true },
     });
