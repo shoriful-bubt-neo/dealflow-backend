@@ -12,38 +12,14 @@ import {
     handleCancelOrder,
     handleConfirmDelivery,
 } from "./deal.room.controller.js";
+import {
+    handleOpenDispute,
+    handleGetActiveDispute,
+    handleSubmitDisputeStatement,
+} from "./deal.dispute.controller.js";
 
 const router = Router();
 
-/**
- * POST /api/v1/deals
- * Create a new deal with guest or authenticated participant
- *
- * Request body:
- * {
- *   type: "BUYER" | "SELLER",
- *   item: string,
- *   amount: number,
- *   phone: string,
- *   payment_method_id: number,
- *   chargeBearer: "BUYER" | "SELLER" | "SPLIT",
- *   device_fingerprint: string
- * }
- *
- * Response 201:
- * {
- *   success: true,
- *   dealId: number,
- *   paymentRef: string,
- *   inviteToken: string,
- *   inviteExpiresAt: string (ISO),
- *   buyerTotal: number,
- *   sellerReceives: number,
- *   role: "BUYER" | "SELLER",
- *   identityId: string,
- *   message: string
- * }
- */
 router.get("/code/:paymentRef", handleGetDealByCode);
 router.post("/join", handleJoinDeal);
 router.post("/", handleCreateDeal);
@@ -59,5 +35,10 @@ router.post("/:dealId/payment/sslcommerz/callback", handleSslCommerzCallback);
 router.post("/:dealId/deliver", handleMarkDelivered);
 router.post("/:dealId/confirm-delivery", handleConfirmDelivery);
 router.post("/:dealId/cancel", handleCancelOrder);
+
+// Dispute (one-shot buyer → seller → admin review)
+router.post("/:dealId/dispute", handleOpenDispute);
+router.get("/:dealId/dispute", handleGetActiveDispute);
+router.post("/:dealId/dispute/statement", handleSubmitDisputeStatement);
 
 export default router;
