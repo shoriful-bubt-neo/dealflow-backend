@@ -179,9 +179,9 @@ model Deal {
   transactions Transaction[]
   charge       DealCharge?
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  deliveredAt DateTime? @map("delivered_at")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
+  deliveredAt               DateTime? @map("delivered_at")
   buyerConfirmationDeadline DateTime? @map("buyer_confirmation_deadline")
 
   @@index([buyerId])
@@ -436,9 +436,10 @@ enum DealStatus {
   PAID
   DELIVERED
   COMPLETED
+  PAYMENT_RELEASED
   DISPUTED
   CANCELLED
-  EXPIRED // 🔥 NEW
+  EXPIRED
 }
 
 enum EscrowStatus {
@@ -464,8 +465,8 @@ enum MessageType {
 }
 
 enum MessageSenderType {
-  USER
-  SYSTEM
+  BUYER
+  SELLER
   ADMIN
 }
 
