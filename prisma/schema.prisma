@@ -344,27 +344,73 @@ model DealCharge {
   @@map("deal_charges")
 }
 
-// DISPUTE
+// DISPUTE (production)
+// Flow: buyer opens → buyer submits once (reason + evidence)
+// → seller submits once → UNDER_REVIEW (chat locked) → admin resolves
 
 model Dispute {
   id     Int @id @default(autoincrement())
   dealId Int @map("deal_id")
 
-  reason String
-  status DisputeStatus @default(OPEN)
+  status DisputeStatus @default(AWAITING_BUYER_EVIDENCE)
 
-  resolvedBy     Int?  @map("resolved_by")
-  resolvedByUser User? @relation("resolvedBy", fields: [resolvedBy], references: [id])
+  openedByRole       DisputeParty @default(BUYER) @map("opened_by_role")
+  openedByUserId     Int?         @map("opened_by_user_id")
+  openedByIdentityId String?      @map("opened_by_identity_id")
 
-  resolvedAt DateTime? @map("resolved_at")
+  /// Escrow snapshot when dispute opened (immutable audit amount)
+  amountAtDispute Decimal @map("amount_at_dispute") @db.Decimal(18, 2)
+
+  buyerStatement   String?   @map("buyer_statement") @db.Text
+  buyerSubmittedAt DateTime? @map("buyer_submitted_at")
+  buyerUserId      Int?      @map("buyer_user_id")
+  buyerIdentityId  String?   @map("buyer_identity_id")
+
+  sellerStatement   String?   @map("seller_statement") @db.Text
+  sellerSubmittedAt DateTime? @map("seller_submitted_at")
+  sellerUserId      Int?      @map("seller_user_id")
+  sellerIdentityId  String?   @map("seller_identity_id")
+
+  adminNotes String?            @map("admin_notes") @db.Text
+  resolution DisputeResolution?
+
+  resolvedBy     Int?      @map("resolved_by")
+  resolvedByUser User?     @relation("resolvedBy", fields: [resolvedBy], references: [id])
+  resolvedAt     DateTime? @map("resolved_at")
+  closedAt       DateTime? @map("closed_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  deal Deal @relation(fields: [dealId], references: [id])
+  deal     Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  evidence DisputeEvidence[]
 
   @@index([dealId])
+  @@index([dealId, status])
+  @@index([status, createdAt])
   @@map("disputes")
+}
+
+model DisputeEvidence {
+  id        Int          @id @default(autoincrement())
+  disputeId Int          @map("dispute_id")
+  party     DisputeParty
+
+  fileName       String  @map("file_name")
+  fileUrl        String  @map("file_url")
+  mimeType       String  @map("mime_type")
+  fileSizeBytes  Int?    @map("file_size_bytes")
+  checksumSha256 String? @map("checksum_sha256")
+
+  uploadedByUserId     Int?    @map("uploaded_by_user_id")
+  uploadedByIdentityId String? @map("uploaded_by_identity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  dispute Dispute @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, party])
+  @@map("dispute_evidence")
 }
 
 // AUDIT LOG
@@ -471,9 +517,22 @@ enum MessageSenderType {
 }
 
 enum DisputeStatus {
-  OPEN
+  AWAITING_BUYER_EVIDENCE
+  AWAITING_SELLER_RESPONSE
+  UNDER_REVIEW
   RESOLVED
-  REJECTED
+  CLOSED
+}
+
+enum DisputeResolution {
+  REFUND_TO_BUYER
+  RELEASE_TO_SELLER
+  PARTIAL_REFUND
+}
+
+enum DisputeParty {
+  BUYER
+  SELLER
 }
 
 enum TransactionType {
