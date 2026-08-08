@@ -17,6 +17,7 @@ import {
     handleGetActiveDispute,
     handleSubmitDisputeStatement,
 } from "./deal.dispute.controller.js";
+import { handleAcceptDealAgreement } from "./deal.agreement.controller.js";
 
 const router = Router();
 
@@ -35,6 +36,7 @@ router.post("/:dealId/payment/sslcommerz/callback", handleSslCommerzCallback);
 router.post("/:dealId/deliver", handleMarkDelivered);
 router.post("/:dealId/confirm-delivery", handleConfirmDelivery);
 router.post("/:dealId/cancel", handleCancelOrder);
+router.post("/:dealId/agreement/accept", handleAcceptDealAgreement);
 
 // Dispute (one-shot buyer → seller → admin review)
 router.post("/:dealId/dispute", handleOpenDispute);

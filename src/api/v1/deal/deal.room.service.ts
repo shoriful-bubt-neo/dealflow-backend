@@ -4,6 +4,11 @@ import prisma from "../../../config/prisma.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import type { MessageType, MessageSenderType, DealStatus } from "../../../generated/prisma/enums.js";
 import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
+import {
+    assertAgreementAccepted,
+    getDealAgreementStatus,
+    type DealAgreementStatus,
+} from "./deal.agreement.service.js";
 
 const SSL_COMMERZ_BASE_URL =
     process.env.SSL_COMMERZ_BASE_URL?.replace(/\/$/, "") ||
@@ -50,6 +55,7 @@ export interface DealRoomData {
         canSellerSubmit: boolean;
         chatLocked: boolean;
     } | null;
+    agreement: DealAgreementStatus;
 }
 
 export interface MessageData {
@@ -152,6 +158,7 @@ export async function getDealRoom(
                     d.status === "CLOSED",
             };
         })(),
+        agreement: await getDealAgreementStatus(dealId, identityId),
     };
 }
 
@@ -209,6 +216,8 @@ export async function sendMessage(
     content: string,
     type: MessageType = "USER",
 ): Promise<MessageData> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -291,6 +300,8 @@ export async function updateDealStatus(
     identityId: string,
     newStatus: DealStatus | string,
 ): Promise<{ status: string }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -378,6 +389,8 @@ export async function initiateSslCommerzPayment(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ gatewayUrl: string; transactionId: string }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
         throw new Error("SSLCommerz store credentials are not configured");
     }
@@ -702,6 +715,8 @@ export async function submitPayment(
     paymentMethodId: number,
     amount: number,
 ): Promise<{ success: boolean }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -763,6 +778,8 @@ export async function markItemDelivered(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -866,6 +883,8 @@ export async function confirmDeliveryByBuyer(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
@@ -1154,6 +1173,8 @@ export async function cancelOrder(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string; refundInitiated?: boolean }> {
+    await assertAgreementAccepted(dealId, identityId);
+
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
