@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import * as dealRoomService from "./deal.room.service.js";
 import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 import { z, ZodError } from "zod";
+import { AgreementRequiredError } from "./deal.agreement.service.js";
 
 const sendMessageSchema = z.object({
     content: z.string().trim().min(1, "Message cannot be empty").max(2000),
@@ -47,6 +48,29 @@ function validationErrorResponse(res: Response, error: ZodError) {
     });
 }
 
+function dealRoomErrorResponse(res: Response, error: unknown): Response | void {
+    if (error instanceof ZodError) {
+        return validationErrorResponse(res, error);
+    }
+    if (error instanceof AgreementRequiredError) {
+        return res.status(403).json({
+            success: false,
+            code: error.code,
+            message: error.message,
+        });
+    }
+    if (error instanceof Error) {
+        if (error.message.includes("Unauthorized")) {
+            return res.status(403).json({ success: false, message: error.message });
+        }
+        if (error.message.includes("not found")) {
+            return res.status(404).json({ success: false, message: error.message });
+        }
+        return res.status(400).json({ success: false, message: error.message });
+    }
+    return res.status(500).json({ success: false, message: "Internal server error" });
+}
+
 export async function handleGetDealRoom(
     req: Request,
     res: Response,
@@ -69,16 +93,7 @@ export async function handleGetDealRoom(
         const deal = await dealRoomService.getDealRoom(dealId, userId || null, identityId);
         res.status(200).json({ success: true, data: deal });
     } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -104,16 +119,7 @@ export async function handleGetDealMessages(
         const messages = await dealRoomService.getDealMessages(dealId, userId || null, identityId);
         res.status(200).json({ success: true, data: messages });
     } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -162,20 +168,7 @@ export async function handleSendMessage(
 
         res.status(201).json({ success: true, data: message });
     } catch (error: unknown) {
-        if (error instanceof ZodError) {
-            return validationErrorResponse(res, error);
-        }
-
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -208,20 +201,7 @@ export async function handleUpdateDealStatus(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof ZodError) {
-            return validationErrorResponse(res, error);
-        }
-
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -256,20 +236,7 @@ export async function handleSubmitPayment(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof ZodError) {
-            return validationErrorResponse(res, error);
-        }
-
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -304,20 +271,7 @@ export async function handleInitiateSslCommerzPayment(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof ZodError) {
-            return validationErrorResponse(res, error);
-        }
-
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -389,16 +343,7 @@ export async function handleMarkDelivered(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -433,16 +378,7 @@ export async function handleCancelOrder(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
 
@@ -476,15 +412,6 @@ export async function handleConfirmDelivery(
 
         res.status(200).json({ success: true, data: result });
     } catch (error: unknown) {
-        if (error instanceof Error) {
-            if (error.message.includes("Unauthorized")) {
-                return res.status(403).json({ success: false, message: error.message });
-            }
-            if (error.message.includes("not found")) {
-                return res.status(404).json({ success: false, message: error.message });
-            }
-            return res.status(400).json({ success: false, message: error.message });
-        }
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return dealRoomErrorResponse(res, error);
     }
 }
