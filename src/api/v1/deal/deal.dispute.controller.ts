@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { z, ZodError } from "zod";
 import * as disputeService from "./deal.dispute.service.js";
+import { AgreementRequiredError } from "./deal.agreement.service.js";
 
 const evidenceSchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -24,6 +25,13 @@ function validationErrorResponse(res: Response, error: ZodError) {
 function handleKnownErrors(res: Response, error: unknown) {
   if (error instanceof ZodError) {
     return validationErrorResponse(res, error);
+  }
+  if (error instanceof AgreementRequiredError) {
+    return res.status(403).json({
+      success: false,
+      code: error.code,
+      message: error.message,
+    });
   }
   if (error instanceof Error) {
     if (error.message.includes("Unauthorized")) {

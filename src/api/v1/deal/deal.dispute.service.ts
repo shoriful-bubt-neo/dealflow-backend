@@ -8,6 +8,7 @@ import type {
   DisputeStatus,
   MessageSenderType,
 } from "../../../generated/prisma/enums.js";
+import { assertAgreementAccepted } from "./deal.agreement.service.js";
 
 const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = [
   "AWAITING_BUYER_EVIDENCE",
@@ -149,6 +150,8 @@ export async function openDispute(
   userId: number | null,
   identityId: string,
 ): Promise<ActiveDisputeDTO> {
+  await assertAgreementAccepted(dealId, identityId);
+
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     select: {
@@ -248,6 +251,8 @@ export async function submitDisputeStatement(
   evidenceInputs: DisputeEvidenceInput[] = [],
   sessionRole?: "BUYER" | "SELLER",
 ): Promise<ActiveDisputeDTO> {
+  await assertAgreementAccepted(dealId, identityId);
+
   const trimmed = statement.trim();
   if (!trimmed) throw new Error("Statement / reason is required");
   if (trimmed.length > 5000) throw new Error("Statement is too long");
