@@ -178,6 +178,7 @@ model Deal {
   audits       AuditLog[]
   transactions Transaction[]
   charge       DealCharge?
+  agreementAcceptances DealAgreementAcceptance[]
 
   createdAt                 DateTime  @default(now()) @map("created_at")
   updatedAt                 DateTime  @updatedAt @map("updated_at")
@@ -411,6 +412,48 @@ model DisputeEvidence {
 
   @@index([disputeId, party])
   @@map("dispute_evidence")
+}
+
+// DIGITAL AGREEMENT
+
+model AgreementTemplate {
+  id      Int     @id @default(autoincrement())
+  version String  @unique
+  title   String
+  content String  @db.Text
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  acceptances DealAgreementAcceptance[]
+
+  @@index([isActive, createdAt])
+  @@map("agreement_templates")
+}
+
+model DealAgreementAcceptance {
+  id         Int    @id @default(autoincrement())
+  dealId     Int    @map("deal_id")
+  templateId Int    @map("template_id")
+  version    String
+
+  userId     Int?    @map("user_id")
+  identityId String? @map("identity_id")
+
+  ipAddress   String? @map("ip_address")
+  userAgent   String? @map("user_agent")
+  fingerprint Json?
+
+  acceptedAt DateTime @default(now()) @map("accepted_at")
+
+  deal     Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  template AgreementTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([dealId, identityId, templateId])
+  @@index([dealId, identityId])
+  @@index([templateId])
+  @@map("deal_agreement_acceptances")
 }
 
 // AUDIT LOG
