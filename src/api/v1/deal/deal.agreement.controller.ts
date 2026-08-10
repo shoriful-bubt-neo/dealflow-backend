@@ -31,8 +31,9 @@ export async function handleAcceptDealAgreement(
       return;
     }
 
+    const userId = req.user?.id ?? req.user?.userId ?? null;
     const identityId = req.user?.identityId;
-    if (!identityId) {
+    if (!userId) {
       res.status(401).json({ success: false, message: "Unauthorized" });
       return;
     }
@@ -40,8 +41,8 @@ export async function handleAcceptDealAgreement(
     const payload = acceptAgreementSchema.parse(req.body);
     const result = await acceptDealAgreement({
       dealId,
-      userId: req.user?.userId ?? null,
-      identityId,
+      userId,
+      identityId: identityId || `user:${userId}`,
       deviceFingerprint: payload.device_fingerprint,
       ipAddress: req.ip || req.socket.remoteAddress,
       userAgent: req.get("user-agent") || undefined,
