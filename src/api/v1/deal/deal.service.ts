@@ -563,19 +563,26 @@ export async function joinDeal(
     ipAddress,
     userAgent,
   );
+  const authenticatedUser = await getAuthenticatedUser(payload.user_id);
+  const authenticatedUserId = authenticatedUser?.id ?? null;
 
   if (joinRole === "SELLER") {
     if (deal.buyerDeviceId === identity.deviceId || deal.buyerIdentityId === identity.id) {
       throw new Error("Opposite role cannot join from same device or identity");
     }
+
+    if (authenticatedUserId && deal.buyerId && authenticatedUserId === deal.buyerId) {
+      throw new Error("Opposite role cannot join: same user");
+    }
   } else {
     if (deal.sellerDeviceId === identity.deviceId || deal.sellerIdentityId === identity.id) {
       throw new Error("Opposite role cannot join from same device or identity");
     }
-  }
 
-  const authenticatedUser = await getAuthenticatedUser(payload.user_id);
-  const authenticatedUserId = authenticatedUser?.id ?? null;
+    if (authenticatedUserId && deal.sellerId && authenticatedUserId === deal.sellerId) {
+      throw new Error("Opposite role cannot join: same user");
+    }
+  }
   await linkIdentityToUser(identity.id, authenticatedUserId);
 
   const updateData: Prisma.DealUpdateInput = {

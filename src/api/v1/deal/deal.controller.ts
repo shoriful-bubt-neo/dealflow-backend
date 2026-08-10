@@ -78,7 +78,11 @@ export async function handleJoinDeal(
         res.status(410).json({ success: false, message: error.message });
         return;
       }
-      if (error.message.includes("same device") || error.message.includes("already has both sides")) {
+      if (
+        error.message.includes("same device") ||
+        error.message.includes("already has both sides") ||
+        error.message.includes("same user")
+      ) {
         res.status(403).json({ success: false, message: error.message });
         return;
       }
