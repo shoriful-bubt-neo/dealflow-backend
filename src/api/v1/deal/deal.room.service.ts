@@ -29,7 +29,7 @@ export interface DealRoomData {
     inviteExpiresAt: string | null;
     buyerPhone: string | null;
     sellerPhone: string | null;
-    // viewerRole: "BUYER" | "SELLER";
+    viewerRole: "BUYER" | "SELLER";
     charge: {
         baseAmount: number;
         chargeType: "FIXED" | "PERCENTAGE";
@@ -94,12 +94,16 @@ export async function getDealRoom(
         throw new Error("Deal not found");
     }
 
-    // const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
-    // const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    const isBuyer =
+        (userId != null && deal.buyerId === userId) ||
+        (!!identityId && deal.buyerIdentityId === identityId);
+    const isSeller =
+        (userId != null && deal.sellerId === userId) ||
+        (!!identityId && deal.sellerIdentityId === identityId);
 
-    // if (!isBuyer && !isSeller) {
-    //     throw new Error("Unauthorized: Not a participant in this deal");
-    // }
+    if (!isBuyer && !isSeller) {
+        throw new Error("Unauthorized: Not a participant in this deal");
+    }
 
     return {
         id: deal.id,
@@ -110,7 +114,7 @@ export async function getDealRoom(
         inviteExpiresAt: deal.inviteExpiresAt?.toISOString() ?? null,
         buyerPhone: deal.buyerPhone,
         sellerPhone: deal.sellerPhone,
-        // viewerRole: isBuyer ? "BUYER" : "SELLER",
+        viewerRole: (isBuyer ? "BUYER" : "SELLER") as "BUYER" | "SELLER",
         charge: deal.charge
             ? {
                 baseAmount: Number(deal.charge.baseAmount.toString()),
@@ -158,7 +162,7 @@ export async function getDealRoom(
                     d.status === "CLOSED",
             };
         })(),
-        agreement: await getDealAgreementStatus(dealId, identityId),
+        agreement: await getDealAgreementStatus(dealId, identityId, userId),
     };
 }
 
@@ -181,8 +185,12 @@ export async function getDealMessages(
         throw new Error("Deal not found");
     }
 
-    const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
-    const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    const isBuyer =
+        (userId != null && deal.buyerId === userId) ||
+        (!!identityId && deal.buyerIdentityId === identityId);
+    const isSeller =
+        (userId != null && deal.sellerId === userId) ||
+        (!!identityId && deal.sellerIdentityId === identityId);
 
     if (!isBuyer && !isSeller) {
         throw new Error("Unauthorized: Not a participant in this deal");
@@ -216,7 +224,7 @@ export async function sendMessage(
     content: string,
     type: MessageType = "USER",
 ): Promise<MessageData> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -233,8 +241,12 @@ export async function sendMessage(
         throw new Error("Deal not found");
     }
 
-    const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
-    const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    const isBuyer =
+        (userId != null && deal.buyerId === userId) ||
+        (!!identityId && deal.buyerIdentityId === identityId);
+    const isSeller =
+        (userId != null && deal.sellerId === userId) ||
+        (!!identityId && deal.sellerIdentityId === identityId);
 
     if (!isBuyer && !isSeller) {
         throw new Error("Unauthorized: Not a participant in this deal");
@@ -300,7 +312,7 @@ export async function updateDealStatus(
     identityId: string,
     newStatus: DealStatus | string,
 ): Promise<{ status: string }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -317,8 +329,12 @@ export async function updateDealStatus(
         throw new Error("Deal not found");
     }
 
-    const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
-    const isSeller = deal.sellerId === userId || deal.sellerIdentityId === identityId;
+    const isBuyer =
+        (userId != null && deal.buyerId === userId) ||
+        (!!identityId && deal.buyerIdentityId === identityId);
+    const isSeller =
+        (userId != null && deal.sellerId === userId) ||
+        (!!identityId && deal.sellerIdentityId === identityId);
 
     if (!isBuyer && !isSeller) {
         throw new Error("Unauthorized: Not a participant in this deal");
@@ -389,7 +405,7 @@ export async function initiateSslCommerzPayment(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ gatewayUrl: string; transactionId: string }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
         throw new Error("SSLCommerz store credentials are not configured");
@@ -715,7 +731,7 @@ export async function submitPayment(
     paymentMethodId: number,
     amount: number,
 ): Promise<{ success: boolean }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -778,7 +794,7 @@ export async function markItemDelivered(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -883,7 +899,7 @@ export async function confirmDeliveryByBuyer(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -1173,7 +1189,7 @@ export async function cancelOrder(
     ipAddress?: string,
     userAgent?: string,
 ): Promise<{ success: boolean; message: string; refundInitiated?: boolean }> {
-    await assertAgreementAccepted(dealId, identityId);
+    await assertAgreementAccepted(dealId, identityId, userId);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
