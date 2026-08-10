@@ -78,6 +78,14 @@ async function resolveOrCreateIdentity(
   };
 }
 
+async function linkIdentityToUser(identityId: string, userId: number | null) {
+  if (!userId) return;
+  await prisma.identity.updateMany({
+    where: { id: identityId, userId: null },
+    data: { userId },
+  });
+}
+
 async function getAuthenticatedUser(userId?: number) {
   if (!userId) return null;
   return prisma.user.findFirst({
@@ -440,6 +448,7 @@ export async function createDeal(
     );
     const authenticatedUser = await getAuthenticatedUser(input.authenticatedUserId);
     const authenticatedUserId = authenticatedUser?.id ?? null;
+    await linkIdentityToUser(identity.id, authenticatedUserId);
 
     const paymentConfig = await loadPaymentConfig(input.paymentMethodId, input.amount);
 
@@ -567,6 +576,7 @@ export async function joinDeal(
 
   const authenticatedUser = await getAuthenticatedUser(payload.user_id);
   const authenticatedUserId = authenticatedUser?.id ?? null;
+  await linkIdentityToUser(identity.id, authenticatedUserId);
 
   const updateData: Prisma.DealUpdateInput = {
     status: deal.status,
