@@ -41,21 +41,28 @@ export async function getActiveAgreementTemplate(): Promise<ActiveAgreementTempl
 
 export async function getDealAgreementStatus(
   dealId: number,
-  identityId: string,
+  identityId?: string | null,
+  userId?: number | null,
 ): Promise<DealAgreementStatus> {
   const template = await getActiveAgreementTemplate();
   if (!template) {
     return { accepted: true, template: null, acceptedAt: null };
   }
 
-  const acceptance = await prisma.dealAgreementAcceptance.findUnique({
-    where: {
-      dealId_identityId_templateId: {
-        dealId,
-        identityId,
-        templateId: template.id,
-      },
-    },
+  const or: Prisma.DealAgreementAcceptanceWhereInput[] = [];
+  if (userId) {
+    or.push({ userId, templateId: template.id, dealId });
+  }
+  if (identityId) {
+    or.push({ identityId, templateId: template.id, dealId });
+  }
+
+  if (or.length === 0) {
+    return { accepted: false, template, acceptedAt: null };
+  }
+
+  const acceptance = await prisma.dealAgreementAcceptance.findFirst({
+    where: { OR: or },
     select: { acceptedAt: true },
   });
 
@@ -68,9 +75,10 @@ export async function getDealAgreementStatus(
 
 export async function assertAgreementAccepted(
   dealId: number,
-  identityId: string,
+  identityId?: string | null,
+  userId?: number | null,
 ): Promise<void> {
-  const status = await getDealAgreementStatus(dealId, identityId);
+  const status = await getDealAgreementStatus(dealId, identityId, userId);
   if (!status.accepted) {
     throw new AgreementRequiredError();
   }
@@ -78,7 +86,7 @@ export async function assertAgreementAccepted(
 
 export async function acceptDealAgreement(params: {
   dealId: number;
-  userId: number | null;
+  userId: number;
   identityId: string;
   deviceFingerprint: string;
   ipAddress?: string;
@@ -119,39 +127,47 @@ export async function acceptDealAgreement(params: {
   const fingerprint = parseFingerprint(deviceFingerprint);
 
   const acceptance = await prisma.$transaction(async (tx) => {
-    const row = await tx.dealAgreementAcceptance.upsert({
+    const existing = await tx.dealAgreementAcceptance.findFirst({
       where: {
-        dealId_identityId_templateId: {
-          dealId,
-          identityId,
-          templateId: template.id,
-        },
-      },
-      update: {
-        userId: userId ?? undefined,
-        ipAddress: ipAddress || null,
-        userAgent: userAgent || null,
-        fingerprint,
-        acceptedAt: new Date(),
-        version: template.version,
-      },
-      create: {
         dealId,
         templateId: template.id,
-        version: template.version,
-        userId: userId ?? null,
-        identityId,
-        ipAddress: ipAddress || null,
-        userAgent: userAgent || null,
-        fingerprint,
+        OR: [{ userId }, { identityId }],
       },
-      select: { id: true, acceptedAt: true },
+      select: { id: true },
     });
+
+    const row = existing
+      ? await tx.dealAgreementAcceptance.update({
+          where: { id: existing.id },
+          data: {
+            userId,
+            identityId,
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null,
+            fingerprint,
+            acceptedAt: new Date(),
+            version: template.version,
+          },
+          select: { id: true, acceptedAt: true },
+        })
+      : await tx.dealAgreementAcceptance.create({
+          data: {
+            dealId,
+            templateId: template.id,
+            version: template.version,
+            userId,
+            identityId,
+            ipAddress: ipAddress || null,
+            userAgent: userAgent || null,
+            fingerprint,
+          },
+          select: { id: true, acceptedAt: true },
+        });
 
     await tx.auditLog.create({
       data: {
         dealId,
-        userId: userId ?? undefined,
+        userId,
         action: "AGREEMENT_ACCEPTED",
         entityType: "DealAgreementAcceptance",
         entityId: row.id,
@@ -161,6 +177,7 @@ export async function acceptDealAgreement(params: {
           templateId: template.id,
           version: template.version,
           identityId,
+          userId,
         },
       },
     });
