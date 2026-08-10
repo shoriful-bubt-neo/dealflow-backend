@@ -82,15 +82,19 @@ export async function handleGetDealRoom(
             return;
         }
 
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
-        if (!identityId) {
+        if (!userId && !identityId) {
             res.status(401).json({ success: false, message: "Unauthorized" });
             return;
         }
 
-        const deal = await dealRoomService.getDealRoom(dealId, userId || null, identityId);
+        const deal = await dealRoomService.getDealRoom(
+            dealId,
+            userId || null,
+            identityId || "",
+        );
         res.status(200).json({ success: true, data: deal });
     } catch (error: unknown) {
         return dealRoomErrorResponse(res, error);
@@ -108,7 +112,7 @@ export async function handleGetDealMessages(
             return;
         }
 
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -135,7 +139,7 @@ export async function handleSendMessage(
         }
 
         const payload = sendMessageSchema.parse(req.body);
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -184,7 +188,7 @@ export async function handleUpdateDealStatus(
         }
 
         const payload = updateStatusSchema.parse(req.body);
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -217,7 +221,7 @@ export async function handleSubmitPayment(
         }
 
         const payload = submitPaymentSchema.parse(req.body);
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -252,7 +256,7 @@ export async function handleInitiateSslCommerzPayment(
         }
 
         const payload = initiatePaymentSchema.parse(req.body);
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -325,7 +329,7 @@ export async function handleMarkDelivered(
             return;
         }
 
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -359,7 +363,7 @@ export async function handleCancelOrder(
         }
 
         const { reason } = req.body || {};
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {
@@ -394,7 +398,7 @@ export async function handleConfirmDelivery(
             return;
         }
 
-        const userId = req.user?.userId;
+        const userId = req.user?.id ?? req.user?.userId ?? null;
         const identityId = req.user?.identityId;
 
         if (!identityId) {

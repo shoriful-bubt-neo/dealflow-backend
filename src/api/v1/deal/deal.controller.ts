@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { validateCreateDealPayload, validateJoinDealPayload, prepareValidatedInput } from "./deal.validation.js";
 import { createDeal, getDealByCode, joinDeal } from "./deal.service.js";
 import { generateToken } from "../../../utils/jwt.js";
+import { authCookieOptions } from "../auth/auth.service.js";
 
 /**
  * GET /deals/code/:paymentRef
@@ -35,25 +36,26 @@ export async function handleJoinDeal(
   res: Response,
 ): Promise<void | Response> {
   try {
-    const payload = validateJoinDealPayload(req.body);
+    const payload = validateJoinDealPayload({
+      ...req.body,
+      user_id: req.user?.id,
+    });
     const ipAddress = req.ip || req.socket.remoteAddress;
     const userAgent = req.get("user-agent");
     const requestPath = req.originalUrl || req.path;
 
     const result = await joinDeal(payload, ipAddress, userAgent, requestPath);
     const token = generateToken({
-      userId: payload.user_id,
+      id: req.user?.id,
+      userId: req.user?.id,
+      email: req.user?.email,
+      trustLevel: req.user?.trustLevel ?? 0,
       identityId: result.identityId,
       role: result.role,
       dealId: result.dealId,
     });
 
-    res.cookie("authToken", token, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie("authToken", token, authCookieOptions());
 
     res.status(200).json(result);
   } catch (error: unknown) {
@@ -97,35 +99,21 @@ export async function handleCreateDeal(
   res: Response,
 ): Promise<void | Response> {
   try {
-    // Extract client context
     const ipAddress = req.ip || req.socket.remoteAddress;
     const userAgent = req.get("user-agent");
     const requestPath = req.originalUrl || req.path;
 
-    // Step 1: Validate and parse incoming payload
-    const rawUserIdFromHeader = req.get("x-user-id");
-    const rawUserIdFromBody = req.body?.user_id;
-    const candidateUserId = rawUserIdFromBody ?? rawUserIdFromHeader;
-
-    const normalizedUserId =
-      candidateUserId !== undefined && candidateUserId !== null && `${candidateUserId}`.trim() !== ""
-        ? Number(candidateUserId)
-        : undefined;
-
-    if (normalizedUserId !== undefined && (!Number.isInteger(normalizedUserId) || normalizedUserId <= 0)) {
-      res.status(400).json({
-        success: false,
-        message: "Invalid user ID",
-      });
+    const authenticatedUserId = req.user?.id;
+    if (!authenticatedUserId) {
+      res.status(401).json({ success: false, message: "Unauthorized" });
       return;
     }
 
     const payload = validateCreateDealPayload({
       ...req.body,
-      user_id: normalizedUserId,
+      user_id: authenticatedUserId,
     });
 
-    // Step 2: Prepare input for service layer
     const validatedInput = prepareValidatedInput(
       payload,
       ipAddress,
@@ -133,28 +121,22 @@ export async function handleCreateDeal(
       requestPath,
     );
 
-    // Step 3: Execute business logic
     const response = await createDeal(validatedInput);
 
-    // Step 4: Generate JWT token and set cookie
     const tokenPayload = {
-      userId: normalizedUserId,
+      id: authenticatedUserId,
+      userId: authenticatedUserId,
+      email: req.user?.email,
+      trustLevel: req.user?.trustLevel ?? 0,
       identityId: response.identityId,
       role: response.role,
       dealId: response.dealId,
     };
     const token = generateToken(tokenPayload);
-    res.cookie("authToken", token, {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    res.cookie("authToken", token, authCookieOptions());
 
-    // Step 5: Return 201 Created with deal response
     res.status(201).json(response);
   } catch (error: unknown) {
-    // Handle validation errors (Zod)
     if (error instanceof Error && error.name === "ZodError") {
       const zodError = error as any;
       res.status(400).json({
@@ -165,9 +147,7 @@ export async function handleCreateDeal(
       return;
     }
 
-    // Handle business logic errors
     if (error instanceof Error) {
-      // Fraud detection rejection
       if (error.message.includes("Fraud detected")) {
         res.status(403).json({
           success: false,
@@ -176,7 +156,6 @@ export async function handleCreateDeal(
         return;
       }
 
-      // Payment method not found
       if (error.message.includes("Payment method")) {
         res.status(404).json({
           success: false,
@@ -185,7 +164,6 @@ export async function handleCreateDeal(
         return;
       }
 
-      // Generic bad request
       res.status(400).json({
         success: false,
         message: error.message,
@@ -193,7 +171,6 @@ export async function handleCreateDeal(
       return;
     }
 
-    // Unexpected error
     console.error("Unexpected error in createDeal:", error);
     res.status(500).json({
       success: false,

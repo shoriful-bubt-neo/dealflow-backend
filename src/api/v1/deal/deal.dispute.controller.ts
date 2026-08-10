@@ -61,7 +61,7 @@ export async function handleOpenDispute(
 
     const dispute = await disputeService.openDispute(
       dealId,
-      req.user?.userId || null,
+      (req.user?.id ?? req.user?.userId) || null,
       identityId,
     );
 
@@ -87,7 +87,7 @@ export async function handleGetActiveDispute(
 
     const dispute = await disputeService.getActiveDispute(
       dealId,
-      req.user?.userId || null,
+      (req.user?.id ?? req.user?.userId) || null,
       identityId,
     );
 
@@ -126,7 +126,7 @@ export async function handleSubmitDisputeStatement(
 
     const dispute = await disputeService.submitDisputeStatement(
       dealId,
-      req.user?.userId || null,
+      (req.user?.id ?? req.user?.userId) || null,
       identityId,
       payload.statement,
       payload.evidence,

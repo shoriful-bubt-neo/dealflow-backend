@@ -150,7 +150,7 @@ export async function openDispute(
   userId: number | null,
   identityId: string,
 ): Promise<ActiveDisputeDTO> {
-  await assertAgreementAccepted(dealId, identityId);
+  await assertAgreementAccepted(dealId, identityId, userId);
 
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -251,7 +251,7 @@ export async function submitDisputeStatement(
   evidenceInputs: DisputeEvidenceInput[] = [],
   sessionRole?: "BUYER" | "SELLER",
 ): Promise<ActiveDisputeDTO> {
-  await assertAgreementAccepted(dealId, identityId);
+  await assertAgreementAccepted(dealId, identityId, userId);
 
   const trimmed = statement.trim();
   if (!trimmed) throw new Error("Statement / reason is required");
