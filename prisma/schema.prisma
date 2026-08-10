@@ -12,8 +12,9 @@ datasource db {
 model User {
   id              Int       @id @default(autoincrement())
   name            String?
+  email           String?   @unique
   phone           String?
-  password        String?
+  passwordHash    String?   @map("password")
   isVerified      Boolean   @default(false) @map("is_verified")
   phoneVerifiedAt DateTime? @map("phone_verified_at")
 
@@ -42,9 +43,11 @@ model User {
   verifiedPayments Payment[] @relation("verifiedBy")
   resolvedDisputes Dispute[] @relation("resolvedBy")
 
-  identities Identity[]
+  identities             Identity[]
+  agreementAcceptances   DealAgreementAcceptance[]
 
   @@index([phone])
+  @@index([email])
   @@index([type, status])
   @@map("users")
 }
@@ -449,9 +452,12 @@ model DealAgreementAcceptance {
 
   deal     Deal              @relation(fields: [dealId], references: [id], onDelete: Cascade)
   template AgreementTemplate @relation(fields: [templateId], references: [id])
+  user     User?             @relation(fields: [userId], references: [id])
 
   @@unique([dealId, identityId, templateId])
+  @@unique([dealId, userId, templateId])
   @@index([dealId, identityId])
+  @@index([dealId, userId])
   @@index([templateId])
   @@map("deal_agreement_acceptances")
 }
