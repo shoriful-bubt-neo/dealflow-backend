@@ -51,7 +51,7 @@ export function initializeSocket(httpServer: HTTPServer): Server {
     });
 
     io.on("connection", (socket: AuthenticatedSocket) => {
-        if (!socket.user) return;
+        if (!socket.user?.dealId || !socket.user.identityId!) return;
 
         const user = socket.user;
         socket.join(`deal-${user.dealId}`);
@@ -62,9 +62,9 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                 if (!socket.user) throw new Error("Unauthorized");
 
                 const newMessage = await sendMessage(
-                    socket.user.dealId,
-                    socket.user.userId || null,
-                    socket.user.identityId,
+                    socket.user.dealId!,
+                    (socket.user.id ?? socket.user.userId) || null,
+                    socket.user.identityId!,
                     data.content,
                     "USER"
                 );
@@ -143,8 +143,8 @@ export function initializeSocket(httpServer: HTTPServer): Server {
                 // Call the service function directly
                 const result = await markItemDelivered(
                     data.dealId || user.dealId,
-                    socket.user.userId || null,
-                    socket.user.identityId,
+                    (socket.user.id ?? socket.user.userId) || null,
+                    socket.user.identityId!,
                     socket.handshake.address, // IP address
                     socket.handshake.headers["user-agent"] as string | undefined,
                 );
@@ -163,8 +163,8 @@ export function initializeSocket(httpServer: HTTPServer): Server {
 
                 const result = await cancelOrder(
                     data.dealId || user.dealId,
-                    socket.user.userId || null,
-                    socket.user.identityId,
+                    (socket.user.id ?? socket.user.userId) || null,
+                    socket.user.identityId!,
                     data.reason,
                     socket.handshake.address,
                     socket.handshake.headers["user-agent"] as string | undefined,
