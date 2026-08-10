@@ -14,7 +14,7 @@ export const createUser = async (payload: CreateUserPayload & { roleIds?: string
     return prisma.user.create({
         data: {
             ...userData,
-            password: hashedPassword,
+            passwordHash: hashedPassword,
             roles: {
                 create: roleIds?.map((id) => ({
                     roleId: Number(id),
@@ -30,7 +30,7 @@ export const updateUser = async (id: number, payload: UpdateUserPayload & { role
 
     if (password) {
         const salt = await bcrypt.genSalt(10);
-        data.password = await bcrypt.hash(password, salt);
+        data.passwordHash = await bcrypt.hash(password, salt);
     }
 
     return prisma.user.update({
