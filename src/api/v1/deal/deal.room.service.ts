@@ -619,7 +619,7 @@ export async function confirmSslCommerzPayment(
                 action: "SSL_COMMERZ_PAYMENT_CONFIRMED",
                 entityType: "deal",
                 entityId: dealId,
-                deviceId: userAgent || undefined,
+                deviceId: undefined,
                 ipAddress: ipAddress || undefined,
                 meta: {
                     transactionId,
@@ -676,7 +676,7 @@ export async function confirmSslCommerzPayment(
                 action: "SSL_COMMERZ_PAYMENT_FAILED",
                 entityType: "deal",
                 entityId: dealId,
-                deviceId: userAgent || undefined,
+                deviceId: undefined,
                 ipAddress: ipAddress || undefined,
                 meta: {
                     transactionId,

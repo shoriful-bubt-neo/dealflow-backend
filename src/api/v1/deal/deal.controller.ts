@@ -3,6 +3,7 @@ import { validateCreateDealPayload, validateJoinDealPayload, prepareValidatedInp
 import { createDeal, getDealByCode, joinDeal } from "./deal.service.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { authCookieOptions } from "../auth/auth.service.js";
+import { getClientIp } from "../../../utils/requestContext.js";
 
 /**
  * GET /deals/code/:paymentRef
@@ -40,7 +41,7 @@ export async function handleJoinDeal(
       ...req.body,
       user_id: req.user?.id,
     });
-    const ipAddress = req.ip || req.socket.remoteAddress;
+    const ipAddress = getClientIp(req);
     const userAgent = req.get("user-agent");
     const requestPath = req.originalUrl || req.path;
 
@@ -103,7 +104,7 @@ export async function handleCreateDeal(
   res: Response,
 ): Promise<void | Response> {
   try {
-    const ipAddress = req.ip || req.socket.remoteAddress;
+    const ipAddress = getClientIp(req);
     const userAgent = req.get("user-agent");
     const requestPath = req.originalUrl || req.path;
 

@@ -12,6 +12,7 @@ import type {
   JoinDealResponse,
 } from "./deal.types.js";
 import { Prisma } from "../../../generated/prisma/client.js";
+import { appendIpHistory, parseCanonicalFingerprint } from "../../../utils/requestContext.js";
 
 interface IdentityResult {
   id: string;
@@ -41,48 +42,39 @@ async function resolveOrCreateIdentity(
   deviceFingerprint: string,
   ipAddress?: string,
   userAgent?: string,
+  isVerifiedUser = false,
 ): Promise<IdentityResult> {
-  // Parse the fingerprint JSON string
-  let fingerprintData;
-  try {
-    fingerprintData = JSON.parse(deviceFingerprint);
-  } catch {
-    fingerprintData = { raw: deviceFingerprint };
-  }
-
-  const deviceId = crypto
-    .createHash("sha256")
-    .update(deviceFingerprint)
-    .digest("hex");
+  const fingerprint = parseCanonicalFingerprint(deviceFingerprint);
+  const existing = await prisma.identity.findUnique({
+    where: { deviceId: fingerprint.visitorId },
+    select: { ipHistory: true },
+  });
 
   const identity = await prisma.identity.upsert({
-    where: { deviceId },
+    where: { deviceId: fingerprint.visitorId },
     update: {
-      ip: ipAddress || null,
-      userAgent: userAgent || null,
-      fingerprint: fingerprintData,
+      ip: ipAddress || undefined,
+      ipHistory: appendIpHistory(existing?.ipHistory, ipAddress),
+      userAgent: userAgent || undefined,
+      fingerprint: fingerprint.data,
     },
     create: {
-      deviceId,
+      deviceId: fingerprint.visitorId,
       ip: ipAddress,
-      fingerprint: fingerprintData,
+      ipHistory: ipAddress ? [ipAddress] : undefined,
+      fingerprint: fingerprint.data,
       userAgent,
-      trustLevel: 0,
+      trustLevel: isVerifiedUser ? 1 : 0,
     },
   });
 
-  return {
-    id: identity.id,
-    deviceId: identity.deviceId,
-    userId: identity.userId ?? null,
-  };
+  return { id: identity.id, deviceId: identity.deviceId, userId: identity.userId ?? null };
 }
-
-async function linkIdentityToUser(identityId: string, userId: number | null) {
+async function linkIdentityToUser(identityId: string, userId: number | null, isVerifiedUser: boolean) {
   if (!userId) return;
   await prisma.identity.updateMany({
     where: { id: identityId, userId: null },
-    data: { userId },
+    data: { userId, ...(isVerifiedUser ? { trustLevel: 1 } : {}) },
   });
 }
 
@@ -97,6 +89,7 @@ async function getAuthenticatedUser(userId?: number) {
     select: {
       id: true,
       phone: true,
+      isVerified: true,
     },
   });
 }
@@ -441,14 +434,15 @@ export async function createDeal(
   input: ValidatedDealInput,
 ): Promise<CreateDealResponse> {
   try {
+    const authenticatedUser = await getAuthenticatedUser(input.authenticatedUserId);
+    const authenticatedUserId = authenticatedUser?.id ?? null;
     const identity = await resolveOrCreateIdentity(
       input.deviceFingerprint,
       input.ipAddress,
       input.userAgent,
+      authenticatedUser?.isVerified ?? false,
     );
-    const authenticatedUser = await getAuthenticatedUser(input.authenticatedUserId);
-    const authenticatedUserId = authenticatedUser?.id ?? null;
-    await linkIdentityToUser(identity.id, authenticatedUserId);
+    await linkIdentityToUser(identity.id, authenticatedUserId, authenticatedUser?.isVerified ?? false);
 
     const paymentConfig = await loadPaymentConfig(input.paymentMethodId, input.amount);
 
@@ -558,13 +552,14 @@ export async function joinDeal(
   }
 
   const joinRole = resolveJoinRole(deal);
+  const authenticatedUser = await getAuthenticatedUser(payload.user_id);
+  const authenticatedUserId = authenticatedUser?.id ?? null;
   const identity = await resolveOrCreateIdentity(
     payload.device_fingerprint,
     ipAddress,
     userAgent,
+    authenticatedUser?.isVerified ?? false,
   );
-  const authenticatedUser = await getAuthenticatedUser(payload.user_id);
-  const authenticatedUserId = authenticatedUser?.id ?? null;
 
   if (joinRole === "SELLER") {
     if (deal.buyerDeviceId === identity.deviceId || deal.buyerIdentityId === identity.id) {
@@ -583,7 +578,7 @@ export async function joinDeal(
       throw new Error("Opposite role cannot join: same user");
     }
   }
-  await linkIdentityToUser(identity.id, authenticatedUserId);
+  await linkIdentityToUser(identity.id, authenticatedUserId, authenticatedUser?.isVerified ?? false);
 
   const updateData: Prisma.DealUpdateInput = {
     status: deal.status,
