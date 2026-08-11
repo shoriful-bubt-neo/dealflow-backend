@@ -4,6 +4,7 @@ import {
   acceptDealAgreement,
   AgreementRequiredError,
 } from "./deal.agreement.service.js";
+import { getClientIp } from "../../../utils/requestContext.js";
 
 const acceptAgreementSchema = z.object({
   device_fingerprint: z
@@ -44,7 +45,7 @@ export async function handleAcceptDealAgreement(
       userId,
       identityId: identityId || `user:${userId}`,
       deviceFingerprint: payload.device_fingerprint,
-      ipAddress: req.ip || req.socket.remoteAddress,
+      ipAddress: getClientIp(req),
       userAgent: req.get("user-agent") || undefined,
     });
 

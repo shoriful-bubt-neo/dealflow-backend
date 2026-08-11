@@ -1,5 +1,6 @@
 import type { Prisma } from "../../../generated/prisma/client.js";
 import prisma from "../../../config/prisma.js";
+import { parseCanonicalFingerprint } from "../../../utils/requestContext.js";
 
 export class AgreementRequiredError extends Error {
   readonly code = "AGREEMENT_REQUIRED" as const;
@@ -21,14 +22,6 @@ export type DealAgreementStatus = {
   template: ActiveAgreementTemplate | null;
   acceptedAt: string | null;
 };
-
-function parseFingerprint(raw: string): Prisma.InputJsonValue {
-  try {
-    return JSON.parse(raw) as Prisma.InputJsonValue;
-  } catch {
-    return { raw };
-  }
-}
 
 export async function getActiveAgreementTemplate(): Promise<ActiveAgreementTemplate | null> {
   const template = await prisma.agreementTemplate.findFirst({
@@ -124,7 +117,7 @@ export async function acceptDealAgreement(params: {
     throw new Error("No active agreement template configured");
   }
 
-  const fingerprint = parseFingerprint(deviceFingerprint);
+  const fingerprint = parseCanonicalFingerprint(deviceFingerprint);
 
   const acceptance = await prisma.$transaction(async (tx) => {
     const existing = await tx.dealAgreementAcceptance.findFirst({
@@ -144,7 +137,7 @@ export async function acceptDealAgreement(params: {
             identityId,
             ipAddress: ipAddress || null,
             userAgent: userAgent || null,
-            fingerprint,
+            fingerprint: fingerprint.data,
             acceptedAt: new Date(),
             version: template.version,
           },
@@ -159,7 +152,7 @@ export async function acceptDealAgreement(params: {
             identityId,
             ipAddress: ipAddress || null,
             userAgent: userAgent || null,
-            fingerprint,
+            fingerprint: fingerprint.data,
           },
           select: { id: true, acceptedAt: true },
         });
@@ -172,7 +165,7 @@ export async function acceptDealAgreement(params: {
         entityType: "DealAgreementAcceptance",
         entityId: row.id,
         ipAddress: ipAddress || undefined,
-        deviceId: identityId,
+        deviceId: fingerprint.visitorId,
         meta: {
           templateId: template.id,
           version: template.version,
@@ -181,6 +174,8 @@ export async function acceptDealAgreement(params: {
         },
       },
     });
+
+    await tx.requestLog.create({ data: { ip: ipAddress || "unknown", deviceId: fingerprint.visitorId, path: `/api/v1/deals/${dealId}/agreement` } });
 
     return row;
   });
