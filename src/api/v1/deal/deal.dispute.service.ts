@@ -1,6 +1,3 @@
-import { createHash, randomUUID } from "crypto";
-import fs from "fs/promises";
-import path from "path";
 import prisma from "../../../config/prisma.js";
 import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 import type {
@@ -9,6 +6,12 @@ import type {
   MessageSenderType,
 } from "../../../generated/prisma/enums.js";
 import { assertAgreementAccepted } from "./deal.agreement.service.js";
+import {
+  createPresignedDownloadUrl,
+  isS3ObjectKey,
+  MAX_UPLOAD_BYTES,
+} from "../../../services/storage.service.js";
+import { assertUploadedEvidenceObject } from "../uploads/upload.service.js";
 
 const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = [
   "AWAITING_BUYER_EVIDENCE",
@@ -17,12 +20,12 @@ const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = [
 ];
 
 const MAX_EVIDENCE_FILES = 5;
-const MAX_EVIDENCE_BYTES = 5 * 1024 * 1024; // 5MB each
 
 export type DisputeEvidenceInput = {
   fileName: string;
   mimeType: string;
-  dataBase64: string;
+  objectKey: string;
+  fileSizeBytes?: number;
 };
 
 export type ActiveDisputeDTO = {
@@ -42,6 +45,7 @@ export type ActiveDisputeDTO = {
     party: DisputeParty;
     fileName: string;
     fileUrl: string;
+    objectKey?: string;
     mimeType: string;
     fileSizeBytes: number | null;
     createdAt: string;
@@ -49,7 +53,7 @@ export type ActiveDisputeDTO = {
   createdAt: string;
 };
 
-function toDisputeDTO(dispute: {
+async function toDisputeDTO(dispute: {
   id: number;
   dealId: number;
   status: DisputeStatus;
@@ -68,7 +72,34 @@ function toDisputeDTO(dispute: {
     fileSizeBytes: number | null;
     createdAt: Date;
   }>;
-}): ActiveDisputeDTO {
+}): Promise<ActiveDisputeDTO> {
+  const evidence = await Promise.all(
+    dispute.evidence.map(async (e) => {
+      let fileUrl = e.fileUrl;
+      if (isS3ObjectKey(e.fileUrl)) {
+        try {
+          const signed = await createPresignedDownloadUrl({
+            objectKey: e.fileUrl,
+            fileName: e.fileName,
+          });
+          fileUrl = signed.downloadUrl;
+        } catch {
+          // Keep object key if signing fails (misconfigured storage)
+        }
+      }
+      return {
+        id: e.id,
+        party: e.party,
+        fileName: e.fileName,
+        fileUrl,
+        objectKey: isS3ObjectKey(e.fileUrl) ? e.fileUrl : undefined,
+        mimeType: e.mimeType,
+        fileSizeBytes: e.fileSizeBytes,
+        createdAt: e.createdAt.toISOString(),
+      };
+    }),
+  );
+
   return {
     id: dispute.id,
     dealId: dispute.dealId,
@@ -84,15 +115,7 @@ function toDisputeDTO(dispute: {
       dispute.status === "UNDER_REVIEW" ||
       dispute.status === "RESOLVED" ||
       dispute.status === "CLOSED",
-    evidence: dispute.evidence.map((e) => ({
-      id: e.id,
-      party: e.party,
-      fileName: e.fileName,
-      fileUrl: e.fileUrl,
-      mimeType: e.mimeType,
-      fileSizeBytes: e.fileSizeBytes,
-      createdAt: e.createdAt.toISOString(),
-    })),
+    evidence,
     createdAt: dispute.createdAt.toISOString(),
   };
 }
@@ -142,7 +165,7 @@ export async function getActiveDispute(
 ): Promise<ActiveDisputeDTO | null> {
   await assertParticipant(dealId, userId, identityId);
   const dispute = await loadActiveDispute(dealId);
-  return dispute ? toDisputeDTO(dispute) : null;
+  return dispute ? await toDisputeDTO(dispute) : null;
 }
 
 export async function openDispute(
@@ -178,7 +201,7 @@ export async function openDispute(
   }
 
   const existing = await loadActiveDispute(dealId);
-  if (existing) return toDisputeDTO(existing);
+  if (existing) return await toDisputeDTO(existing);
 
   const result = await prisma.$transaction(async (tx) => {
     const created = await tx.dispute.create({
@@ -224,7 +247,7 @@ export async function openDispute(
     return { dispute: created, messages: [openMessage] };
   });
 
-  const dto = toDisputeDTO(result.dispute);
+  const dto = await toDisputeDTO(result.dispute);
   for (const message of result.messages) {
     emitDisputeChatMessage(dealId, message, "buyer");
   }
@@ -314,11 +337,8 @@ export async function submitDisputeStatement(
     throw new Error("Seller cannot submit yet or already submitted");
   }
 
-  const savedEvidence = await saveEvidenceFiles(
+  const savedEvidence = await registerEvidenceObjects(
     dispute.id,
-    party,
-    userId,
-    identityId,
     evidenceInputs,
   );
 
@@ -420,7 +440,7 @@ export async function submitDisputeStatement(
     return { dispute: result, messages };
   });
 
-  const dto = toDisputeDTO(updated.dispute);
+  const dto = await toDisputeDTO(updated.dispute);
   const senderRole = party === "BUYER" ? "buyer" : "seller";
   for (const message of updated.messages) {
     emitDisputeChatMessage(
@@ -469,55 +489,52 @@ async function assertParticipant(
   }
 }
 
-async function saveEvidenceFiles(
+async function registerEvidenceObjects(
   disputeId: number,
-  party: DisputeParty,
-  _userId: number | null,
-  _identityId: string,
   inputs: DisputeEvidenceInput[],
 ) {
-  const uploadDir = path.join(
-    process.cwd(),
-    "uploads",
-    "disputes",
-    String(disputeId),
-  );
-  await fs.mkdir(uploadDir, { recursive: true });
-
   const saved: Array<{
     fileName: string;
     fileUrl: string;
     mimeType: string;
     fileSizeBytes: number;
-    checksumSha256: string;
+    checksumSha256: string | null;
   }> = [];
+
+  const seenKeys = new Set<string>();
 
   for (const input of inputs) {
     const fileName = input.fileName?.trim();
-    const mimeType = input.mimeType?.trim() || "application/octet-stream";
+    const mimeType = input.mimeType?.trim();
+    const objectKey = input.objectKey?.trim();
     if (!fileName) throw new Error("Evidence fileName is required");
-    if (!input.dataBase64) throw new Error("Evidence data is required");
+    if (!mimeType) throw new Error("Evidence mimeType is required");
+    if (!objectKey) throw new Error("Evidence objectKey is required");
+    if (seenKeys.has(objectKey)) {
+      throw new Error(`Duplicate evidence objectKey: ${objectKey}`);
+    }
+    seenKeys.add(objectKey);
 
-    const raw = input.dataBase64.includes(",")
-      ? input.dataBase64.split(",")[1]
-      : input.dataBase64;
-    const buffer = Buffer.from(raw, "base64");
-    if (!buffer.length) throw new Error(`Empty evidence file: ${fileName}`);
-    if (buffer.length > MAX_EVIDENCE_BYTES) {
-      throw new Error(`File too large (max 5MB): ${fileName}`);
+    if (
+      input.fileSizeBytes != null &&
+      input.fileSizeBytes > MAX_UPLOAD_BYTES
+    ) {
+      throw new Error(`File too large (max ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB): ${fileName}`);
     }
 
-    const safeBase = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
-    const storedName = `${party.toLowerCase()}-${randomUUID()}-${safeBase}`;
-    const absPath = path.join(uploadDir, storedName);
-    await fs.writeFile(absPath, buffer);
+    const verified = await assertUploadedEvidenceObject({
+      disputeId,
+      objectKey,
+      mimeType,
+      fileSizeBytes: input.fileSizeBytes,
+    });
 
     saved.push({
       fileName,
-      fileUrl: `/uploads/disputes/${disputeId}/${storedName}`,
+      fileUrl: objectKey,
       mimeType,
-      fileSizeBytes: buffer.length,
-      checksumSha256: createHash("sha256").update(buffer).digest("hex"),
+      fileSizeBytes: verified.fileSizeBytes,
+      checksumSha256: null,
     });
   }
 

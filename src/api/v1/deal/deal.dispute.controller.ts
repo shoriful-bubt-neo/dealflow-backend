@@ -2,11 +2,26 @@ import { Request, Response } from "express";
 import { z, ZodError } from "zod";
 import * as disputeService from "./deal.dispute.service.js";
 import { AgreementRequiredError } from "./deal.agreement.service.js";
+import {
+  ALLOWED_UPLOAD_MIME_TYPES,
+  MAX_UPLOAD_BYTES,
+} from "../../../services/storage.service.js";
 
 const evidenceSchema = z.object({
   fileName: z.string().trim().min(1).max(255),
-  mimeType: z.string().trim().min(1).max(120),
-  dataBase64: z.string().min(1),
+  mimeType: z.enum(ALLOWED_UPLOAD_MIME_TYPES),
+  objectKey: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(/^disputes\/\d+\//, "objectKey must be a dispute storage key"),
+  fileSizeBytes: z.coerce
+    .number()
+    .int()
+    .positive()
+    .max(MAX_UPLOAD_BYTES)
+    .optional(),
 });
 
 const submitStatementSchema = z.object({
