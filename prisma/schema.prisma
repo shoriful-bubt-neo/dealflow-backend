@@ -56,6 +56,7 @@ model Identity {
   id          String  @id @default(uuid())
   deviceId    String  @unique // browser/device identifier
   ip          String?
+  ipHistory   Json?   @map("ip_history")
   fingerprint Json? // ব্রাউজারের হার্ডওয়্যার ডিটেইলস সেভ রাখার জন্য
   userAgent   String?
   trustLevel  Int     @default(0) // 0=guest,1=verified,2=trusted
