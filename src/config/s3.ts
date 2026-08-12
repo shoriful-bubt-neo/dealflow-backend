@@ -12,6 +12,11 @@ if (!S3_BUCKET && process.env.NODE_ENV === "production") {
   console.warn("[s3] S3_BUCKET is not configured");
 }
 
+/**
+ * Disable flexible checksums on presigned PUTs.
+ * AWS SDK v3 otherwise adds x-amz-checksum-* query params that force a browser
+ * CORS preflight LocalStack/S3 often fails to answer.
+ */
 export const s3Client = new S3Client({
   region,
   ...(endpoint
@@ -27,4 +32,6 @@ export const s3Client = new S3Client({
           secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
         }
       : undefined,
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
