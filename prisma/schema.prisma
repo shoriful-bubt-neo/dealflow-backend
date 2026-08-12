@@ -16,6 +16,8 @@ model User {
   phone           String?
   passwordHash    String?   @map("password")
   isVerified      Boolean   @default(false) @map("is_verified")
+  /// KYC trust score (0–100). Set to 100 after successful NID + face verification.
+  trustLevel      Int       @default(0) @map("trust_level")
   phoneVerifiedAt DateTime? @map("phone_verified_at")
 
   // ADMIN users can access panel and use RBAC roles.
@@ -45,6 +47,7 @@ model User {
 
   identities             Identity[]
   agreementAcceptances   DealAgreementAcceptance[]
+  kycSubmissions         KycSubmission[]
 
   @@index([phone])
   @@index([email])
@@ -72,6 +75,34 @@ model Identity {
 
   @@index([deviceId])
   @@map("identities")
+}
+
+// KYC VERIFICATION
+
+model KycSubmission {
+  id     Int    @id @default(autoincrement())
+  userId Int    @map("user_id")
+  user   User   @relation(fields: [userId], references: [id])
+
+  nidNumber   String @map("nid_number")
+  dateOfBirth String @map("date_of_birth") // YYYY-MM-DD
+  selfieS3Key String @map("selfie_s3_key")
+
+  vendor KycVendor
+  status KycSubmissionStatus @default(PENDING)
+
+  faceMatchScore Decimal? @map("face_match_score") @db.Decimal(5, 2)
+  matchedName    String?  @map("matched_name")
+  failureCode    String?  @map("failure_code")
+  vendorPayload  Json?    @map("vendor_payload")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId, createdAt])
+  @@index([nidNumber])
+  @@index([status])
+  @@map("kyc_submissions")
 }
 
 model Role {
@@ -614,4 +645,15 @@ enum UserStatus {
   VERIFIED
   SUSPENDED
   CLOSED
+}
+
+enum KycVendor {
+  PORICHOY_MOCK
+  PORICHOY
+}
+
+enum KycSubmissionStatus {
+  PENDING
+  VERIFIED
+  FAILED
 }
