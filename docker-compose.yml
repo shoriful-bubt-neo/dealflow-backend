@@ -7,3 +7,10 @@ services:
     environment:
       - SERVICES=s3
       - AWS_DEFAULT_REGION=us-east-1
+      - S3_BUCKET=dealflow-local-bucket
+    volumes:
+      - ./localstack/init:/etc/localstack/init
+      - localstack_data:/var/lib/localstack
+
+volumes:
+  localstack_data:
