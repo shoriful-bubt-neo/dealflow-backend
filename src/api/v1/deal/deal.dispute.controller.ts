@@ -6,6 +6,7 @@ import {
   ALLOWED_UPLOAD_MIME_TYPES,
   MAX_UPLOAD_BYTES,
 } from "../../../services/storage.service.js";
+import { isKycRequiredError, sendKycRequiredResponse } from "../../../utils/kycHttp.js";
 
 const evidenceSchema = z.object({
   fileName: z.string().trim().min(1).max(255),
@@ -40,6 +41,9 @@ function validationErrorResponse(res: Response, error: ZodError) {
 function handleKnownErrors(res: Response, error: unknown) {
   if (error instanceof ZodError) {
     return validationErrorResponse(res, error);
+  }
+  if (isKycRequiredError(error)) {
+    return sendKycRequiredResponse(res, error);
   }
   if (error instanceof AgreementRequiredError) {
     return res.status(403).json({

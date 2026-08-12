@@ -12,6 +12,7 @@ import {
   MAX_UPLOAD_BYTES,
 } from "../../../services/storage.service.js";
 import { assertUploadedEvidenceObject } from "../uploads/upload.service.js";
+import { assertKycAllowed } from "../../../utils/kycRequirement.js";
 
 const ACTIVE_DISPUTE_STATUSES: DisputeStatus[] = [
   "AWAITING_BUYER_EVIDENCE",
@@ -174,6 +175,7 @@ export async function openDispute(
   identityId: string,
 ): Promise<ActiveDisputeDTO> {
   await assertAgreementAccepted(dealId, identityId, userId);
+  await assertKycAllowed(userId, dealId, true);
 
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
@@ -275,6 +277,7 @@ export async function submitDisputeStatement(
   sessionRole?: "BUYER" | "SELLER",
 ): Promise<ActiveDisputeDTO> {
   await assertAgreementAccepted(dealId, identityId, userId);
+  await assertKycAllowed(userId, dealId, true);
 
   const trimmed = statement.trim();
   if (!trimmed) throw new Error("Statement / reason is required");
