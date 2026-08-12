@@ -1,24 +1,54 @@
 import { Request, Response } from "express";
 import {
-  registerUser,
+  startRegistration,
+  completeRegistration,
   loginUser,
   getCurrentUser,
   authCookieOptions,
 } from "./auth.service.js";
-import { loginSchema, registerSchema } from "./auth.validation.js";
+import { loginSchema, registerSchema, verifyOtpSchema } from "./auth.validation.js";
 
 export async function handleRegister(req: Request, res: Response): Promise<void> {
   try {
     const { body } = registerSchema.parse({ body: req.body });
-    const { user, token } = await registerUser(body);
-    res.cookie("authToken", token, authCookieOptions());
-    res.status(201).json({ success: true, data: { user, token } });
+    const { channelSent } = await startRegistration(body);
+    res.status(200).json({ success: true, data: { channelSent } });
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "ZodError") {
       res.status(400).json({
         success: false,
         message: "Validation error",
-        errors: (error as any).issues,
+        errors: (error as unknown as { issues: unknown }).issues,
+      });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("already registered")) {
+      res.status(409).json({ success: false, message: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes("rate limit")) {
+      res.status(429).json({ success: false, message: error.message });
+      return;
+    }
+    res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : "Registration failed",
+    });
+  }
+}
+
+export async function handleVerifyOtp(req: Request, res: Response): Promise<void> {
+  try {
+    const { body } = verifyOtpSchema.parse({ body: req.body });
+    const { user, token } = await completeRegistration(body);
+    res.cookie("authToken", token, authCookieOptions());
+    res.status(201).json({ success: true, token, user });
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === "ZodError") {
+      res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: (error as unknown as { issues: unknown }).issues,
       });
       return;
     }
@@ -28,7 +58,7 @@ export async function handleRegister(req: Request, res: Response): Promise<void>
     }
     res.status(400).json({
       success: false,
-      message: error instanceof Error ? error.message : "Registration failed",
+      message: error instanceof Error ? error.message : "OTP verification failed",
     });
   }
 }
@@ -44,7 +74,7 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
       res.status(400).json({
         success: false,
         message: "Validation error",
-        errors: (error as any).issues,
+        errors: (error as unknown as { issues: unknown }).issues,
       });
       return;
     }

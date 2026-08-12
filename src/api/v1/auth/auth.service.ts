@@ -1,7 +1,9 @@
 import bcrypt from "bcrypt";
 import prisma from "../../../config/prisma.js";
+import { generateOtp, verifyOtp } from "../../../services/otp.service.js";
+import { dispatchOtp } from "../../../services/otpDispatcher.service.js";
 import { generateToken, type JWTPayload } from "../../../utils/jwt.js";
-import type { LoginBody, RegisterBody } from "./auth.validation.js";
+import type { LoginBody, RegisterBody, VerifyOtpBody } from "./auth.validation.js";
 
 const SALT_ROUNDS = 10;
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -10,6 +12,7 @@ export type SanitizedUser = {
   id: number;
   email: string | null;
   name: string | null;
+  phone: string | null;
   isVerified: boolean;
   status: string;
   type: string;
@@ -22,20 +25,31 @@ function sanitizeUser(
     id: number;
     email: string | null;
     name: string | null;
+    phone?: string | null;
     isVerified: boolean;
     status: string;
     type: string;
+    trustLevel?: number;
     createdAt: Date;
     identities?: { trustLevel: number }[];
   },
 ): SanitizedUser {
-  const trustLevel =
+  const identityTrust =
     user.identities?.reduce((max, i) => Math.max(max, i.trustLevel), 0) ?? 0;
+  const trustLevel =
+    typeof user.trustLevel === "number" && user.trustLevel > 0
+      ? user.trustLevel
+      : identityTrust >= 2
+        ? 100
+        : identityTrust >= 1
+          ? 50
+          : 0;
 
   return {
     id: user.id,
     email: user.email,
     name: user.name,
+    phone: user.phone ?? null,
     isVerified: user.isVerified,
     status: user.status,
     type: user.type,
@@ -64,20 +78,54 @@ export function authCookieOptions() {
   };
 }
 
-export async function registerUser(payload: RegisterBody): Promise<{
-  user: SanitizedUser;
-  token: string;
+export async function startRegistration(payload: RegisterBody): Promise<{
+  channelSent: string;
 }> {
   const existing = await prisma.user.findFirst({
     where: {
-      email: payload.email,
-      deletedAt: null,
+      OR: [
+        { email: payload.email, deletedAt: null },
+        { phone: payload.phone, deletedAt: null },
+      ],
     },
-    select: { id: true },
+    select: { id: true, email: true, phone: true },
   });
 
   if (existing) {
-    throw new Error("Email already registered");
+    if (existing.email === payload.email) {
+      throw new Error("Email already registered");
+    }
+    throw new Error("Phone number already registered");
+  }
+
+  const code = await generateOtp(payload.phone);
+  const { channel } = await dispatchOtp(payload.phone, payload.email, code);
+  return { channelSent: channel };
+}
+
+export async function completeRegistration(payload: VerifyOtpBody): Promise<{
+  user: SanitizedUser;
+  token: string;
+}> {
+  const ok = await verifyOtp(payload.phone, payload.code);
+  if (!ok) {
+    throw new Error("Invalid or expired OTP");
+  }
+
+  const existing = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: payload.email, deletedAt: null },
+        { phone: payload.phone, deletedAt: null },
+      ],
+    },
+    select: { id: true, email: true, phone: true },
+  });
+  if (existing) {
+    if (existing.email === payload.email) {
+      throw new Error("Email already registered");
+    }
+    throw new Error("Phone number already registered");
   }
 
   const passwordHash = await bcrypt.hash(payload.password, SALT_ROUNDS);
@@ -86,17 +134,24 @@ export async function registerUser(payload: RegisterBody): Promise<{
     data: {
       name: payload.name,
       email: payload.email,
+      phone: payload.phone,
       passwordHash,
       type: "BUYER",
       status: "PENDING_VERIFICATION",
       isVerified: false,
+      trustLevel: 10,
+      phoneVerifiedAt: new Date(),
       isActive: true,
+      lastOtpAt: new Date(),
+      lastLoginAt: new Date(),
     },
     select: {
       id: true,
       email: true,
       name: true,
+      phone: true,
       isVerified: true,
+      trustLevel: true,
       status: true,
       type: true,
       createdAt: true,
@@ -121,8 +176,10 @@ export async function loginUser(payload: LoginBody): Promise<{
       id: true,
       email: true,
       name: true,
+      phone: true,
       passwordHash: true,
       isVerified: true,
+      trustLevel: true,
       status: true,
       type: true,
       isActive: true,
@@ -164,7 +221,9 @@ export async function getCurrentUser(userId: number): Promise<SanitizedUser | nu
       id: true,
       email: true,
       name: true,
+      phone: true,
       isVerified: true,
+      trustLevel: true,
       status: true,
       type: true,
       createdAt: true,
