@@ -72,6 +72,17 @@ export function isDisputeObjectKey(objectKey: string, disputeId: number): boolea
   return objectKey.startsWith(`disputes/${disputeId}/`) && !objectKey.includes("..");
 }
 
+export function buildKycSelfieObjectKey(userId: number, fileName: string): string {
+  const safeBase = fileName.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
+  return `kyc/${userId}/selfies/${randomUUID()}-${safeBase}`;
+}
+
+export function isKycSelfieObjectKey(objectKey: string, userId: number): boolean {
+  return (
+    objectKey.startsWith(`kyc/${userId}/selfies/`) && !objectKey.includes("..")
+  );
+}
+
 export async function createPresignedUploadUrl(params: {
   objectKey: string;
   mimeType: string;
@@ -89,7 +100,11 @@ export async function createPresignedUploadUrl(params: {
     ContentType: params.mimeType,
   });
 
-  const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn });
+  // Sign only Content-Type; avoid checksum query params that break browser CORS.
+  const uploadUrl = await getSignedUrl(s3Client, command, {
+    expiresIn,
+    signableHeaders: new Set(["content-type"]),
+  });
   return { uploadUrl, objectKey: params.objectKey, expiresIn };
 }
 
