@@ -13,6 +13,7 @@ import type {
 } from "./deal.types.js";
 import { Prisma } from "../../../generated/prisma/client.js";
 import { appendIpHistory, parseCanonicalFingerprint } from "../../../utils/requestContext.js";
+import { assertKycAllowed } from "../../../utils/kycRequirement.js";
 
 interface IdentityResult {
   id: string;
@@ -436,6 +437,14 @@ export async function createDeal(
   try {
     const authenticatedUser = await getAuthenticatedUser(input.authenticatedUserId);
     const authenticatedUserId = authenticatedUser?.id ?? null;
+
+    await assertKycAllowed(
+      authenticatedUserId,
+      null,
+      false,
+      Number(input.amount),
+    );
+
     const identity = await resolveOrCreateIdentity(
       input.deviceFingerprint,
       input.ipAddress,
@@ -554,6 +563,9 @@ export async function joinDeal(
   const joinRole = resolveJoinRole(deal);
   const authenticatedUser = await getAuthenticatedUser(payload.user_id);
   const authenticatedUserId = authenticatedUser?.id ?? null;
+
+  await assertKycAllowed(authenticatedUserId, deal.id, false);
+
   const identity = await resolveOrCreateIdentity(
     payload.device_fingerprint,
     ipAddress,

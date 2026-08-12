@@ -4,6 +4,7 @@ import { createDeal, getDealByCode, joinDeal } from "./deal.service.js";
 import { generateToken } from "../../../utils/jwt.js";
 import { authCookieOptions } from "../auth/auth.service.js";
 import { getClientIp } from "../../../utils/requestContext.js";
+import { isKycRequiredError, sendKycRequiredResponse } from "../../../utils/kycHttp.js";
 
 /**
  * GET /deals/code/:paymentRef
@@ -68,6 +69,10 @@ export async function handleJoinDeal(
         errors: zodError.errors,
       });
       return;
+    }
+
+    if (isKycRequiredError(error)) {
+      return sendKycRequiredResponse(res, error);
     }
 
     if (error instanceof Error) {
@@ -150,6 +155,10 @@ export async function handleCreateDeal(
         errors: zodError.errors,
       });
       return;
+    }
+
+    if (isKycRequiredError(error)) {
+      return sendKycRequiredResponse(res, error);
     }
 
     if (error instanceof Error) {
