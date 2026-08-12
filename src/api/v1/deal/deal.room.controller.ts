@@ -3,6 +3,7 @@ import * as dealRoomService from "./deal.room.service.js";
 import { emitToDealRoom } from "../../../sockets/roomEmitter.js";
 import { z, ZodError } from "zod";
 import { AgreementRequiredError } from "./deal.agreement.service.js";
+import { isKycRequiredError, sendKycRequiredResponse } from "../../../utils/kycHttp.js";
 
 const sendMessageSchema = z.object({
     content: z.string().trim().min(1, "Message cannot be empty").max(2000),
@@ -51,6 +52,9 @@ function validationErrorResponse(res: Response, error: ZodError) {
 function dealRoomErrorResponse(res: Response, error: unknown): Response | void {
     if (error instanceof ZodError) {
         return validationErrorResponse(res, error);
+    }
+    if (isKycRequiredError(error)) {
+        return sendKycRequiredResponse(res, error);
     }
     if (error instanceof AgreementRequiredError) {
         return res.status(403).json({

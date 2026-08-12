@@ -9,6 +9,7 @@ import {
     getDealAgreementStatus,
     type DealAgreementStatus,
 } from "./deal.agreement.service.js";
+import { assertKycAllowed } from "../../../utils/kycRequirement.js";
 
 const SSL_COMMERZ_BASE_URL =
     process.env.SSL_COMMERZ_BASE_URL?.replace(/\/$/, "") ||
@@ -406,6 +407,7 @@ export async function initiateSslCommerzPayment(
     userAgent?: string,
 ): Promise<{ gatewayUrl: string; transactionId: string }> {
     await assertAgreementAccepted(dealId, identityId, userId);
+    await assertKycAllowed(userId, dealId, false);
 
     if (!SSL_COMMERZ_STORE_ID || !SSL_COMMERZ_STORE_PASSWORD) {
         throw new Error("SSLCommerz store credentials are not configured");
@@ -732,6 +734,7 @@ export async function submitPayment(
     amount: number,
 ): Promise<{ success: boolean }> {
     await assertAgreementAccepted(dealId, identityId, userId);
+    await assertKycAllowed(userId, dealId, false);
 
     const deal = await prisma.deal.findUnique({
         where: { id: dealId },
@@ -915,6 +918,9 @@ export async function confirmDeliveryByBuyer(
     if (!deal) {
         throw new Error("Deal not found");
     }
+
+    // High-value deals always require KYC for payout; disputed deals always require KYC
+    await assertKycAllowed(userId, dealId, deal.status === "DISPUTED");
 
     const isBuyer = deal.buyerId === userId || deal.buyerIdentityId === identityId;
     if (!isBuyer) {
