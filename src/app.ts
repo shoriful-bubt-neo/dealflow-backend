@@ -10,6 +10,7 @@ import serviceChargeConfigRoutes from "./api/v1/serviceChargeConfig/serviceCharg
 import dealRoutes from "./api/v1/deal/deal.route.js";
 import authRoutes from "./api/v1/auth/auth.route.js";
 import uploadRoutes from "./api/v1/uploads/upload.route.js";
+import kycRoutes from "./api/v1/kyc/kyc.route.js";
 import { globalErrorHandler } from "./middlewares/errorHandler.js";
 import { authenticateToken } from "./middlewares/auth.js";
 
@@ -37,6 +38,7 @@ app.use("/api/v1/payment-methods", paymentMethodRoutes);
 app.use("/api/v1/service-charge-configs", serviceChargeConfigRoutes);
 app.use("/api/v1/deals", dealRoutes);
 app.use("/api/v1/uploads", uploadRoutes);
+app.use("/api/v1/kyc", kycRoutes);
 
 // middlewares
 app.use(globalErrorHandler);
