@@ -7,6 +7,9 @@ import type { LoginBody, RegisterBody, VerifyOtpBody } from "./auth.validation.j
 
 const SALT_ROUNDS = 10;
 const COOKIE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const ADMIN_ROLE_ID = 1;
+
+export type AuthRedirectTo = "/admin/dashboard" | "/dashboard";
 
 export type SanitizedUser = {
   id: number;
@@ -17,8 +20,33 @@ export type SanitizedUser = {
   status: string;
   type: string;
   trustLevel: number;
+  roleId: number | null;
   createdAt: string;
 };
+
+const userAuthSelect = {
+  id: true,
+  email: true,
+  name: true,
+  phone: true,
+  isVerified: true,
+  trustLevel: true,
+  status: true,
+  type: true,
+  createdAt: true,
+  identities: { select: { trustLevel: true }, take: 5 },
+  roles: { select: { roleId: true } },
+} as const;
+
+function resolveRoleId(roles?: { roleId: number }[]): number | null {
+  if (!roles?.length) return null;
+  const adminRole = roles.find((r) => r.roleId === ADMIN_ROLE_ID);
+  return adminRole?.roleId ?? roles[0]!.roleId;
+}
+
+export function resolveRedirectTo(roleId: number | null | undefined): AuthRedirectTo {
+  return roleId === ADMIN_ROLE_ID ? "/admin/dashboard" : "/dashboard";
+}
 
 function sanitizeUser(
   user: {
@@ -32,6 +60,7 @@ function sanitizeUser(
     trustLevel?: number;
     createdAt: Date;
     identities?: { trustLevel: number }[];
+    roles?: { roleId: number }[];
   },
 ): SanitizedUser {
   const identityTrust =
@@ -54,6 +83,7 @@ function sanitizeUser(
     status: user.status,
     type: user.type,
     trustLevel,
+    roleId: resolveRoleId(user.roles),
     createdAt: user.createdAt.toISOString(),
   };
 }
@@ -64,6 +94,7 @@ export function buildSessionToken(user: SanitizedUser, extra?: Partial<JWTPayloa
     userId: user.id,
     email: user.email,
     trustLevel: user.trustLevel,
+    roleId: user.roleId,
     ...extra,
   });
 }
@@ -106,6 +137,7 @@ export async function startRegistration(payload: RegisterBody): Promise<{
 export async function completeRegistration(payload: VerifyOtpBody): Promise<{
   user: SanitizedUser;
   token: string;
+  redirectTo: AuthRedirectTo;
 }> {
   const ok = await verifyOtp(payload.phone, payload.code);
   if (!ok) {
@@ -145,27 +177,21 @@ export async function completeRegistration(payload: VerifyOtpBody): Promise<{
       lastOtpAt: new Date(),
       lastLoginAt: new Date(),
     },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      phone: true,
-      isVerified: true,
-      trustLevel: true,
-      status: true,
-      type: true,
-      createdAt: true,
-      identities: { select: { trustLevel: true }, take: 5 },
-    },
+    select: userAuthSelect,
   });
 
   const sanitized = sanitizeUser(user);
-  return { user: sanitized, token: buildSessionToken(sanitized) };
+  return {
+    user: sanitized,
+    token: buildSessionToken(sanitized),
+    redirectTo: resolveRedirectTo(sanitized.roleId),
+  };
 }
 
 export async function loginUser(payload: LoginBody): Promise<{
   user: SanitizedUser;
   token: string;
+  redirectTo: AuthRedirectTo;
 }> {
   const user = await prisma.user.findFirst({
     where: {
@@ -173,18 +199,9 @@ export async function loginUser(payload: LoginBody): Promise<{
       deletedAt: null,
     },
     select: {
-      id: true,
-      email: true,
-      name: true,
-      phone: true,
+      ...userAuthSelect,
       passwordHash: true,
-      isVerified: true,
-      trustLevel: true,
-      status: true,
-      type: true,
       isActive: true,
-      createdAt: true,
-      identities: { select: { trustLevel: true }, take: 5 },
     },
   });
 
@@ -207,7 +224,11 @@ export async function loginUser(payload: LoginBody): Promise<{
   });
 
   const sanitized = sanitizeUser(user);
-  return { user: sanitized, token: buildSessionToken(sanitized) };
+  return {
+    user: sanitized,
+    token: buildSessionToken(sanitized),
+    redirectTo: resolveRedirectTo(sanitized.roleId),
+  };
 }
 
 export async function getCurrentUser(userId: number): Promise<SanitizedUser | null> {
@@ -217,18 +238,7 @@ export async function getCurrentUser(userId: number): Promise<SanitizedUser | nu
       deletedAt: null,
       isActive: true,
     },
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      phone: true,
-      isVerified: true,
-      trustLevel: true,
-      status: true,
-      type: true,
-      createdAt: true,
-      identities: { select: { trustLevel: true }, take: 5 },
-    },
+    select: userAuthSelect,
   });
 
   return user ? sanitizeUser(user) : null;

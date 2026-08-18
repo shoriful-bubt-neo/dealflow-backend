@@ -40,9 +40,9 @@ export async function handleRegister(req: Request, res: Response): Promise<void>
 export async function handleVerifyOtp(req: Request, res: Response): Promise<void> {
   try {
     const { body } = verifyOtpSchema.parse({ body: req.body });
-    const { user, token } = await completeRegistration(body);
+    const { user, token, redirectTo } = await completeRegistration(body);
     res.cookie("authToken", token, authCookieOptions());
-    res.status(201).json({ success: true, token, user });
+    res.status(201).json({ success: true, token, user, redirectTo });
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "ZodError") {
       res.status(400).json({
@@ -66,9 +66,9 @@ export async function handleVerifyOtp(req: Request, res: Response): Promise<void
 export async function handleLogin(req: Request, res: Response): Promise<void> {
   try {
     const { body } = loginSchema.parse({ body: req.body });
-    const { user, token } = await loginUser(body);
+    const { user, token, redirectTo } = await loginUser(body);
     res.cookie("authToken", token, authCookieOptions());
-    res.status(200).json({ success: true, data: { user, token } });
+    res.status(200).json({ success: true, data: { user, token, redirectTo } });
   } catch (error: unknown) {
     if (error instanceof Error && error.name === "ZodError") {
       res.status(400).json({
@@ -86,7 +86,13 @@ export async function handleLogin(req: Request, res: Response): Promise<void> {
 }
 
 export async function handleLogout(_req: Request, res: Response): Promise<void> {
-  res.clearCookie("authToken", { path: "/" });
+  const opts = authCookieOptions();
+  res.clearCookie("authToken", {
+    httpOnly: opts.httpOnly,
+    secure: opts.secure,
+    sameSite: opts.sameSite,
+    path: opts.path,
+  });
   res.status(200).json({ success: true, message: "Logged out" });
 }
 
