@@ -51,7 +51,12 @@ export function initializeSocket(httpServer: HTTPServer): Server {
     });
 
     io.on("connection", (socket: AuthenticatedSocket) => {
-        if (!socket.user?.dealId || !socket.user.identityId!) return;
+        const sessionUserId = socket.user?.id ?? socket.user?.userId ?? 0;
+        if (sessionUserId > 0) {
+            socket.join(`user-${sessionUserId}`);
+        }
+
+        if (!socket.user?.dealId || !socket.user.identityId) return;
 
         const user = socket.user;
         socket.join(`deal-${user.dealId}`);
@@ -178,6 +183,9 @@ export function initializeSocket(httpServer: HTTPServer): Server {
         });
 
         socket.on("disconnect", () => {
+            if (sessionUserId > 0) {
+                socket.leave(`user-${sessionUserId}`);
+            }
             socket.leave(`deal-${user.dealId}`);
         });
     });

@@ -12,6 +12,7 @@ export interface JWTPayload {
   userId?: number;
   identityId?: string;
   role?: "BUYER" | "SELLER";
+  roleId?: number | null;
   dealId?: number;
 }
 
@@ -22,6 +23,7 @@ export type AuthUser = {
   userId: number;
   identityId?: string;
   role?: "BUYER" | "SELLER";
+  roleId?: number | null;
   dealId?: number;
 };
 
@@ -36,6 +38,7 @@ export function normalizeAuthUser(payload: JWTPayload): AuthUser | null {
     userId: payload.userId ?? id,
     identityId: payload.identityId,
     role: payload.role,
+    roleId: payload.roleId ?? null,
     dealId: payload.dealId,
   };
 }
