@@ -12,9 +12,16 @@ export type NidVerifySuccess = {
   raw?: unknown;
 };
 
+export type NidVerifyFailureCode =
+  | "NID_NOT_FOUND"
+  | "NID_MISMATCH"
+  | "VENDOR_ERROR"
+  | "VENDOR_TIMEOUT"
+  | "INVALID_INPUT";
+
 export type NidVerifyFailure = {
   success: false;
-  code: "NID_NOT_FOUND" | "NID_MISMATCH" | "VENDOR_ERROR" | "INVALID_INPUT";
+  code: NidVerifyFailureCode;
   message: string;
   vendor: KycVendor;
   raw?: unknown;
@@ -31,4 +38,5 @@ export type FaceCompareResult = {
   score: number;
   matched: boolean;
   mode: "rekognition" | "mock";
+  timedOut?: boolean;
 };

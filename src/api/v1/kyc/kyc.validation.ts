@@ -23,6 +23,8 @@ export const verifyKycSchema = z.object({
   }),
 });
 
+export const submitKycSchema = verifyKycSchema;
+
 export const kycSelfiePresignSchema = z.object({
   body: z.object({
     fileName: z.string().trim().min(1).max(255),
@@ -36,4 +38,5 @@ export const kycSelfiePresignSchema = z.object({
 });
 
 export type VerifyKycBody = z.infer<typeof verifyKycSchema>["body"];
+export type SubmitKycBody = z.infer<typeof submitKycSchema>["body"];
 export type KycSelfiePresignBody = z.infer<typeof kycSelfiePresignSchema>["body"];

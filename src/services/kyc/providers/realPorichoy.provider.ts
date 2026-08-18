@@ -79,6 +79,12 @@ export class RealPorichoyProvider implements IKycProvider {
         raw: data,
       };
     } catch (error: unknown) {
+      const timedOut =
+        axios.isAxiosError(error) &&
+        (error.code === "ECONNABORTED" ||
+          error.code === "ETIMEDOUT" ||
+          error.message.toLowerCase().includes("timeout"));
+
       const message =
         axios.isAxiosError(error)
           ? error.response?.data?.message || error.message
@@ -88,7 +94,7 @@ export class RealPorichoyProvider implements IKycProvider {
 
       return {
         success: false,
-        code: "VENDOR_ERROR",
+        code: timedOut ? "VENDOR_TIMEOUT" : "VENDOR_ERROR",
         message: String(message),
         vendor: this.vendor,
         raw: axios.isAxiosError(error) ? error.response?.data : undefined,

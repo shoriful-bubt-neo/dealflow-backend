@@ -3,9 +3,14 @@ export const KYC_THRESHOLD_AMOUNT = Number(
   process.env.KYC_THRESHOLD_AMOUNT ?? 5000,
 );
 
-/** Minimum face-match confidence (%) required to mark user verified. */
+/** Auto-pass face-match confidence (%). >= this → VERIFIED. */
 export const KYC_FACE_MATCH_THRESHOLD = Number(
-  process.env.KYC_FACE_MATCH_THRESHOLD ?? 80,
+  process.env.KYC_FACE_MATCH_THRESHOLD ?? 85,
+);
+
+/** Manual-review floor (%). 50–84 → PENDING; below → FAILED. */
+export const KYC_FACE_MATCH_FALLBACK_MIN = Number(
+  process.env.KYC_FACE_MATCH_FALLBACK_MIN ?? 50,
 );
 
 /** Auto-pass score used by mock/local face comparison when selfie key exists. */
